@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
@@ -9,194 +9,140 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CarouselImage } from '@/types';
 import { db } from '@/lib/database';
-import { ArrowLeft, Plus, Edit, Trash2, Eye, EyeOff, Upload, ArrowUp, ArrowDown } from 'lucide-react';
+import { Plus, Trash2, ArrowLeft, Image as ImageIcon, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { ImageUpload } from '@/components/ui/image-upload';
 
-export default function CarouselManagementPage() {
+export default function AdminCarouselPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [carouselImages, setCarouselImages] = useState<CarouselImage[]>([]);
-  const [isAdding, setIsAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [newImage, setNewImage] = useState({
-    url: '',
+  const [isLoading, setIsLoading] = useState(true);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showForm, setShowForm] = useState(false);
+
+  // Form state
+  const [formData, setFormData] = useState({
+    imageUrl: '',
     title: '',
     subtitle: '',
-    link: ''
+    linkUrl: ''
   });
-  const [uploadMethod, setUploadMethod] = useState<'url' | 'file'>('url');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [filePreview, setFilePreview] = useState<string>('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (loading) return;
-
-    if (!user) {
+    if (!loading && (!user || user.role !== 'admin')) {
       router.push('/login');
       return;
     }
 
-    if (user.role !== 'admin') {
-      router.push('/');
-      return;
+    if (user && user.role === 'admin') {
+      loadCarouselImages();
     }
+  }, [user, loading, router]);
 
-    loadCarouselImages();
-  }, [user, router, loading]);
-
-  const loadCarouselImages = () => {
+  const loadCarouselImages = async () => {
     try {
-      const siteConfig = db.getSiteConfig();
-      setCarouselImages(siteConfig.carouselImages || []);
+      setIsLoading(true);
+      const images = await db.getAllCarouselImages();
+      setCarouselImages(images);
     } catch (error) {
       console.error('Error loading carousel images:', error);
-      setCarouselImages([]);
+      setMessage({
+        type: 'error',
+        text: 'Error al cargar las imágenes del carrusel'
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      // Validar tipo de archivo
-      if (!file.type.startsWith('image/')) {
-        alert('Por favor selecciona un archivo de imagen válido');
-        return;
-      }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-      // Validar tamaño (máximo 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        alert('El archivo debe ser menor a 5MB');
-        return;
-      }
-
-      setSelectedFile(file);
-
-      // Crear preview
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setFilePreview(e.target?.result as string);
-        setNewImage(prev => ({ ...prev, url: e.target?.result as string }));
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleAddImage = () => {
-    if (uploadMethod === 'url' && (!newImage.url || !newImage.title)) {
-      alert('Por favor completa todos los campos requeridos');
+    if (!formData.imageUrl.trim()) {
+      setMessage({
+        type: 'error',
+        text: 'Debes subir una imagen o ingresar una URL'
+      });
       return;
     }
 
-    if (uploadMethod === 'file' && (!selectedFile || !newImage.title)) {
-      alert('Por favor selecciona un archivo y completa el título');
+    try {
+      const newImage = await db.addCarouselImage({
+        imageUrl: formData.imageUrl.trim(),
+        title: formData.title.trim() || undefined,
+        subtitle: formData.subtitle.trim() || undefined,
+        linkUrl: formData.linkUrl.trim() || undefined,
+        isActive: true
+      });
+
+      if (newImage) {
+        setMessage({
+          type: 'success',
+          text: 'Imagen agregada al carrusel exitosamente'
+        });
+        setFormData({
+          imageUrl: '',
+          title: '',
+          subtitle: '',
+          linkUrl: ''
+        });
+        setShowForm(false);
+        loadCarouselImages();
+      } else {
+        setMessage({
+          type: 'error',
+          text: 'Error al agregar la imagen al carrusel'
+        });
+      }
+    } catch (error) {
+      console.error('Error adding carousel image:', error);
+      setMessage({
+        type: 'error',
+        text: 'Error al agregar la imagen al carrusel'
+      });
+    }
+  };
+
+  const handleDelete = async (imageId: string) => {
+    if (!confirm('¿Estás seguro de que quieres eliminar esta imagen del carrusel?')) {
       return;
     }
 
-    const image: CarouselImage = {
-      id: Date.now().toString(),
-      url: newImage.url,
-      title: newImage.title,
-      subtitle: newImage.subtitle || undefined,
-      link: newImage.link || undefined,
-      order: carouselImages.length + 1,
-      isActive: true
-    };
-
     try {
-      db.addCarouselImage(image);
-      loadCarouselImages();
-      resetForm();
-      alert('Imagen agregada exitosamente');
-    } catch (error) {
-      console.error('Error adding image:', error);
-      alert('Error al agregar la imagen');
-    }
-  };
-
-  const resetForm = () => {
-    setNewImage({ url: '', title: '', subtitle: '', link: '' });
-    setSelectedFile(null);
-    setFilePreview('');
-    setIsAdding(false);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
-  const handleToggleActive = (id: string) => {
-    try {
-      const image = carouselImages.find(img => img.id === id);
-      if (image) {
-        const success = db.updateCarouselImage(id, { isActive: !image.isActive });
-        if (success) {
-          loadCarouselImages();
-        } else {
-          alert('Error al actualizar la imagen');
-        }
-      }
-    } catch (error) {
-      console.error('Error toggling image active state:', error);
-      alert('Error al actualizar la imagen');
-    }
-  };
-
-  const handleDeleteImage = (id: string) => {
-    if (confirm('¿Estás seguro de que deseas eliminar esta imagen? Esta acción no se puede deshacer.')) {
-      try {
-        const success = db.deleteCarouselImage(id);
-        if (success) {
-          loadCarouselImages();
-          alert('Imagen eliminada exitosamente');
-        } else {
-          alert('Error al eliminar la imagen');
-        }
-      } catch (error) {
-        console.error('Error deleting image:', error);
-        alert('Error al eliminar la imagen');
-      }
-    }
-  };
-
-  const handleReorder = (id: string, direction: 'up' | 'down') => {
-    try {
-      const image = carouselImages.find(img => img.id === id);
-      if (!image) return;
-
-      const sortedImages = [...carouselImages].sort((a, b) => a.order - b.order);
-      const currentIndex = sortedImages.findIndex(img => img.id === id);
-
-      if (direction === 'up' && currentIndex > 0) {
-        const targetImage = sortedImages[currentIndex - 1];
-        db.updateCarouselImage(id, { order: targetImage.order });
-        db.updateCarouselImage(targetImage.id, { order: image.order });
+      const success = await db.deleteCarouselImage(imageId);
+      if (success) {
+        setMessage({
+          type: 'success',
+          text: 'Imagen eliminada del carrusel exitosamente'
+        });
         loadCarouselImages();
-      } else if (direction === 'down' && currentIndex < sortedImages.length - 1) {
-        const targetImage = sortedImages[currentIndex + 1];
-        db.updateCarouselImage(id, { order: targetImage.order });
-        db.updateCarouselImage(targetImage.id, { order: image.order });
-        loadCarouselImages();
+      } else {
+        setMessage({
+          type: 'error',
+          text: 'Error al eliminar la imagen del carrusel'
+        });
       }
     } catch (error) {
-      console.error('Error reordering images:', error);
-      alert('Error al reordenar las imágenes');
+      console.error('Error deleting carousel image:', error);
+      setMessage({
+        type: 'error',
+        text: 'Error al eliminar la imagen del carrusel'
+      });
     }
   };
 
-  if (loading) {
+  if (loading || isLoading) {
     return (
-      <div className="min-h-screen flex flex-col">
+      <div className="min-h-screen bg-gray-50">
         <Header />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Cargando gestión de carrusel...</p>
-          </div>
-        </main>
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center">Cargando...</div>
+        </div>
         <Footer />
       </div>
     );
@@ -206,311 +152,203 @@ export default function CarouselManagementPage() {
     return null;
   }
 
-  const activeImages = carouselImages.filter(img => img.isActive).sort((a, b) => a.order - b.order);
-
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen bg-gray-50">
       <Header />
-
-      <main className="flex-1 bg-gray-50 py-8">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between mb-8">
-            <div>
-              <div className="flex items-center space-x-4 mb-2">
-                <Link
-                  href="/admin"
-                  className="flex items-center text-gray-600 hover:text-gray-900"
-                >
-                  <ArrowLeft size={20} className="mr-2" />
-                  Volver al Panel de Administración
-                </Link>
-              </div>
-              <h1 className="text-3xl font-bold text-gray-900">Gestión del Carrusel</h1>
-              <p className="text-gray-600 mt-1">
-                Administra las imágenes del carrusel principal
-              </p>
-            </div>
-            <Button onClick={() => setIsAdding(true)} disabled={isAdding}>
-              <Plus size={16} className="mr-2" />
-              Agregar Imagen
-            </Button>
+      <div className="container mx-auto px-4 py-8">
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-6">
+          <Button asChild variant="outline" size="sm">
+            <Link href="/admin">
+              <ArrowLeft size={16} />
+              Volver al Panel
+            </Link>
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Gestión del Carrusel</h1>
+            <p className="text-gray-600">Administra las imágenes del carrusel principal</p>
           </div>
+        </div>
 
-          {/* Add New Image Form */}
-          {isAdding && (
-            <Card className="mb-8">
-              <CardHeader>
-                <CardTitle>Nueva Imagen del Carrusel</CardTitle>
-                <CardDescription>
-                  Agrega una nueva imagen al carrusel principal
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Upload Method Selection */}
-                <Tabs value={uploadMethod} onValueChange={(value: string) => {
-                  setUploadMethod(value as 'url' | 'file');
-                  resetForm();
-                }}>
-                  <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="url">URL de Imagen</TabsTrigger>
-                    <TabsTrigger value="file">Subir desde PC</TabsTrigger>
-                  </TabsList>
+        {/* Messages */}
+        {message && (
+          <Alert className={`mb-6 ${message.type === 'error' ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
+            <AlertDescription className={message.type === 'error' ? 'text-red-700' : 'text-green-700'}>
+              {message.text}
+            </AlertDescription>
+          </Alert>
+        )}
 
-                  <TabsContent value="url" className="space-y-4">
-                    <div>
-                      <Label htmlFor="imageUrl">URL de la Imagen *</Label>
-                      <Input
-                        id="imageUrl"
-                        type="url"
-                        value={newImage.url}
-                        onChange={(e) => setNewImage(prev => ({ ...prev, url: e.target.value }))}
-                        placeholder="https://ejemplo.com/imagen.jpg"
-                        className="mt-1"
-                      />
-                    </div>
-                  </TabsContent>
+        {/* Add Image Button */}
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <h2 className="text-xl font-semibold">Imágenes del Carrusel ({carouselImages.length})</h2>
+            <p className="text-gray-600">Gestiona las imágenes que se muestran en la página principal</p>
+          </div>
+          <Button onClick={() => setShowForm(!showForm)} className="gap-2">
+            <Plus size={16} />
+            Agregar Imagen
+          </Button>
+        </div>
 
-                  <TabsContent value="file" className="space-y-4">
-                    <div>
-                      <Label htmlFor="imageFile">Seleccionar Archivo *</Label>
-                      <div className="mt-1">
-                        <input
-                          ref={fileInputRef}
-                          id="imageFile"
-                          type="file"
-                          accept="image/*"
-                          onChange={handleFileSelect}
-                          className="hidden"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="w-full"
-                        >
-                          <Upload size={16} className="mr-2" />
-                          {selectedFile ? selectedFile.name : 'Seleccionar imagen desde PC'}
-                        </Button>
-                      </div>
-                      {filePreview && (
-                        <div className="mt-2">
-                          <Image
-                            src={filePreview}
-                            alt="Preview"
-                            width={200}
-                            height={120}
-                            className="rounded border object-cover"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </TabsContent>
-                </Tabs>
-
+        {/* Add Image Form */}
+        {showForm && (
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle>Agregar Nueva Imagen</CardTitle>
+              <CardDescription>
+                Completa los datos para agregar una nueva imagen al carrusel
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {/* Image Upload Section */}
                 <div>
-                  <Label htmlFor="imageTitle">Título *</Label>
-                  <Input
-                    id="imageTitle"
-                    value={newImage.title}
-                    onChange={(e) => setNewImage(prev => ({ ...prev, title: e.target.value }))}
-                    placeholder="NOCHE REGGAETON"
-                    className="mt-1"
+                  <Label className="text-base font-semibold">Imagen del Carrusel *</Label>
+                  <p className="text-sm text-gray-600 mb-3">
+                    Sube una imagen desde tu PC o ingresa una URL externa
+                  </p>
+                  <ImageUpload
+                    value={formData.imageUrl}
+                    onChange={(url) => setFormData({...formData, imageUrl: url})}
+                    onError={(error) => setMessage({ type: 'error', text: error })}
+                    type="carousel"
+                    placeholder="Sube una imagen para el carrusel"
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="imageSubtitle">Subtítulo</Label>
-                  <Input
-                    id="imageSubtitle"
-                    value={newImage.subtitle}
-                    onChange={(e) => setNewImage(prev => ({ ...prev, subtitle: e.target.value }))}
-                    placeholder="La mejor música reggaeton..."
-                    className="mt-1"
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="imageLink">Enlace (opcional)</Label>
-                  <Input
-                    id="imageLink"
-                    type="url"
-                    value={newImage.link}
-                    onChange={(e) => setNewImage(prev => ({ ...prev, link: e.target.value }))}
-                    placeholder="https://ejemplo.com/evento"
-                    className="mt-1"
-                  />
+                {/* Other Fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="title">Título (opcional)</Label>
+                    <Input
+                      id="title"
+                      value={formData.title}
+                      onChange={(e) => setFormData({...formData, title: e.target.value})}
+                      placeholder="Título de la imagen"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="subtitle">Subtítulo (opcional)</Label>
+                    <Input
+                      id="subtitle"
+                      value={formData.subtitle}
+                      onChange={(e) => setFormData({...formData, subtitle: e.target.value})}
+                      placeholder="Descripción o subtítulo"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label htmlFor="linkUrl">Enlace (opcional)</Label>
+                    <Input
+                      id="linkUrl"
+                      type="url"
+                      value={formData.linkUrl}
+                      onChange={(e) => setFormData({...formData, linkUrl: e.target.value})}
+                      placeholder="https://enlace-destino.com"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex gap-2">
-                  <Button
-                    onClick={handleAddImage}
-                    disabled={
-                      (uploadMethod === 'url' && (!newImage.url || !newImage.title)) ||
-                      (uploadMethod === 'file' && (!selectedFile || !newImage.title))
-                    }
-                  >
+                  <Button type="submit">
                     Agregar Imagen
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={resetForm}
-                  >
+                  <Button type="button" variant="outline" onClick={() => setShowForm(false)}>
                     Cancelar
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Images List */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {carouselImages.length === 0 ? (
+            <Card className="col-span-full">
+              <CardContent className="pt-6">
+                <div className="text-center py-8">
+                  <ImageIcon size={48} className="mx-auto text-gray-400 mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No hay imágenes en el carrusel
+                  </h3>
+                  <p className="text-gray-600 mb-4">
+                    Agrega la primera imagen para comenzar
+                  </p>
+                  <Button onClick={() => setShowForm(true)} className="gap-2">
+                    <Plus size={16} />
+                    Agregar Primera Imagen
                   </Button>
                 </div>
               </CardContent>
             </Card>
-          )}
-
-          {/* Current Images */}
-          <div className="grid gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Imágenes del Carrusel ({carouselImages.length})</CardTitle>
-                <CardDescription>
-                  Las imágenes se rotan cada 2 segundos automáticamente. Solo las imágenes activas se muestran en el carrusel.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {carouselImages.length === 0 ? (
-                  <div className="text-center py-12">
-                    <div className="text-gray-400 mb-4">📸</div>
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">
-                      No hay imágenes en el carrusel
-                    </h3>
-                    <p className="text-gray-500 mb-4">
-                      Agrega la primera imagen para comenzar
-                    </p>
-                    <Button onClick={() => setIsAdding(true)}>
-                      <Plus size={16} className="mr-2" />
-                      Agregar Primera Imagen
-                    </Button>
-                  </div>
-                ) : (
+          ) : (
+            carouselImages.map((image) => (
+              <Card key={image.id}>
+                <CardContent className="p-4">
                   <div className="space-y-4">
-                    {carouselImages
-                      .sort((a, b) => a.order - b.order)
-                      .map((image, index) => (
-                        <div
-                          key={image.id}
-                          className={`flex items-center gap-4 p-4 border rounded-lg ${
-                            image.isActive ? 'bg-white border-blue-200' : 'bg-gray-50 opacity-70 border-gray-200'
-                          }`}
-                        >
-                          <div className="flex-shrink-0">
-                            <Image
-                              src={image.url}
-                              alt={image.title}
-                              width={120}
-                              height={80}
-                              className="w-30 h-20 object-cover rounded border"
-                            />
-                          </div>
+                    {/* Image Preview */}
+                    <div className="aspect-video rounded-lg overflow-hidden bg-gray-100">
+                      <img
+                        src={image.imageUrl}
+                        alt={image.title || 'Imagen del carrusel'}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjAwIiBoZWlnaHQ9IjEwMCIgZmlsbD0iI2Y3ZjdmNyIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIwLjNlbSI+SW1hZ2VuIG5vIGRpc3BvbmlibGU8L3RleHQ+PC9zdmc+';
+                        }}
+                      />
+                    </div>
 
-                          <div className="flex-1">
-                            <h3 className="font-medium">{image.title}</h3>
-                            {image.subtitle && (
-                              <p className="text-sm text-gray-600">{image.subtitle}</p>
-                            )}
-                            {image.link && (
-                              <p className="text-xs text-blue-600 truncate">Enlace: {image.link}</p>
-                            )}
-                            <div className="flex items-center gap-2 mt-2">
-                              <span className="text-xs text-gray-500">Orden: {image.order}</span>
-                              {image.isActive ? (
-                                <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">Activa</span>
-                              ) : (
-                                <span className="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded">Inactiva</span>
-                              )}
-                            </div>
-                          </div>
+                    {/* Image Info */}
+                    <div className="space-y-2">
+                      {image.title && (
+                        <h3 className="font-semibold text-gray-900">{image.title}</h3>
+                      )}
+                      {image.subtitle && (
+                        <p className="text-gray-600 text-sm">{image.subtitle}</p>
+                      )}
 
-                          <div className="flex flex-col gap-2">
-                            {/* Reorder buttons */}
-                            <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleReorder(image.id, 'up')}
-                                disabled={index === 0}
-                                title="Subir"
-                              >
-                                <ArrowUp size={14} />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleReorder(image.id, 'down')}
-                                disabled={index === carouselImages.length - 1}
-                                title="Bajar"
-                              >
-                                <ArrowDown size={14} />
-                              </Button>
-                            </div>
-
-                            {/* Action buttons */}
-                            <div className="flex gap-1">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleToggleActive(image.id)}
-                                title={image.isActive ? 'Ocultar' : 'Mostrar'}
-                              >
-                                {image.isActive ? <EyeOff size={14} /> : <Eye size={14} />}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="destructive"
-                                onClick={() => handleDeleteImage(image.id)}
-                                title="Eliminar"
-                              >
-                                <Trash2 size={14} />
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Preview Section */}
-            {activeImages.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Vista Previa del Carrusel</CardTitle>
-                  <CardDescription>
-                    Así se ven las imágenes activas en el carrusel principal
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {activeImages.map((image) => (
-                      <div key={image.id} className="relative">
-                        <Image
-                          src={image.url}
-                          alt={image.title}
-                          width={300}
-                          height={200}
-                          className="w-full h-32 object-cover rounded"
-                        />
-                        <div className="absolute inset-0 bg-black bg-opacity-40 rounded flex flex-col justify-end p-3">
-                          <h4 className="text-white font-bold text-sm">{image.title}</h4>
-                          {image.subtitle && (
-                            <p className="text-white text-xs opacity-90">{image.subtitle}</p>
-                          )}
-                        </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={image.isActive ? "default" : "secondary"}>
+                          {image.isActive ? 'Activa' : 'Inactiva'}
+                        </Badge>
+                        {image.linkUrl && (
+                          <Badge variant="outline" className="gap-1">
+                            <ExternalLink size={12} />
+                            Con enlace
+                          </Badge>
+                        )}
                       </div>
-                    ))}
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-2">
+                        {image.linkUrl && (
+                          <Button asChild variant="outline" size="sm">
+                            <a href={image.linkUrl} target="_blank" rel="noopener noreferrer">
+                              <ExternalLink size={14} />
+                              Ver enlace
+                            </a>
+                          </Button>
+                        )}
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDelete(image.id)}
+                          className="gap-1"
+                        >
+                          <Trash2 size={14} />
+                          Eliminar
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
-            )}
-          </div>
+            ))
+          )}
         </div>
-      </main>
-
+      </div>
       <Footer />
     </div>
   );

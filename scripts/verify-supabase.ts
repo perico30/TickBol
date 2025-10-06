@@ -1,99 +1,82 @@
+#!/usr/bin/env bun
+
 import { supabase } from '../src/lib/supabase';
+import { db } from '../src/lib/database';
 
-async function verifySupabase() {
-  console.log('🔍 VERIFICANDO CONEXIÓN CON SUPABASE...\n');
+console.log('🔍 Verificando estado de Supabase...\n');
 
+async function verifyAndSetup() {
   try {
-    // 1. Test basic connection
-    console.log('1. Probando conexión básica...');
-    const { data, error } = await supabase
+    // 1. Verificar conexión
+    console.log('1. Verificando conexión a Supabase...');
+    const { data: connection, error: connectionError } = await supabase
       .from('users')
-      .select('email, name, role')
-      .limit(5);
+      .select('count', { count: 'exact', head: true });
 
-    if (error) {
-      console.log('❌ Error de conexión:', error.message);
+    if (connectionError) {
+      console.error('❌ Error de conexión:', connectionError.message);
+      if (connectionError.message.includes('relation "users" does not exist')) {
+        console.log('\n🚨 LAS TABLAS NO EXISTEN EN SUPABASE');
+        console.log('📋 Necesitas ejecutar el esquema SQL:');
+        console.log('   1. Ve a https://supabase.com/dashboard');
+        console.log('   2. Abre tu proyecto: gtqydwhbzcnhltkgzpzd');
+        console.log('   3. Ve a SQL Editor');
+        console.log('   4. Copia y ejecuta TODO el contenido de: supabase/schema.sql');
+        return;
+      }
       return;
     }
 
-    console.log('✅ Conexión exitosa');
-    console.log(`📊 Usuarios encontrados: ${data.length}`);
+    console.log('✅ Conexión establecida');
 
-    // 2. Check for admin user
-    console.log('\n2. Verificando usuario admin...');
-    const { data: adminUser, error: adminError } = await supabase
-      .from('users')
-      .select('*')
-      .eq('email', 'admin@eventosdisc.com')
-      .single();
+    // 2. Verificar si existe usuario admin
+    console.log('\n2. Verificando usuario administrador...');
+    const adminUser = await db.authenticateUser('admin@eventosdisc.com', 'admin123');
 
-    if (adminError) {
-      console.log('❌ Usuario admin no encontrado:', adminError.message);
-
-      // Try to create admin user
-      console.log('\n3. Creando usuario admin...');
-      const { data: newAdmin, error: createError } = await supabase
-        .from('users')
-        .insert({
-          email: 'admin@eventosdisc.com',
-          password_hash: '$2b$10$LBYMiwKTGSXxtxSjqjMy0eqmR3ER2MYLtOn3e1wtI0P7t99nkS8QW',
-          name: 'Administrador Principal',
-          role: 'admin',
-          permissions: {
-            canManageUsers: true,
-            canManageBusinesses: true,
-            canApproveEvents: true,
-            canManageSiteConfig: true,
-            canViewAllData: true
-          }
-        })
-        .select()
-        .single();
-
-      if (createError) {
-        console.log('❌ Error creando admin:', createError.message);
-      } else {
-        console.log('✅ Usuario admin creado exitosamente');
-      }
-    } else {
+    if (adminUser) {
       console.log('✅ Usuario admin encontrado:', adminUser.email);
-    }
-
-    // 3. Check site config
-    console.log('\n4. Verificando configuración del sitio...');
-    const { data: siteConfig, error: configError } = await supabase
-      .from('site_config')
-      .select('*')
-      .limit(1)
-      .single();
-
-    if (configError) {
-      console.log('❌ Configuración del sitio no encontrada:', configError.message);
+      console.log('🎉 SISTEMA LISTO PARA USAR!');
+      console.log('\n📋 Credenciales de acceso:');
+      console.log('   Email: admin@eventosdisc.com');
+      console.log('   Password: admin123');
+      console.log('   URL: http://localhost:3000/login');
     } else {
-      console.log('✅ Configuración del sitio encontrada');
+      console.log('⚠️ Usuario admin no encontrado, creándolo...');
+
+      // 3. Crear usuario admin
+      const newAdmin = await db.addUser({
+        email: 'admin@eventosdisc.com',
+        password: 'admin123',
+        name: 'Administrador Principal',
+        role: 'admin'
+      });
+
+      if (newAdmin) {
+        console.log('✅ Usuario admin creado exitosamente!');
+        console.log('🎉 SISTEMA COMPLETAMENTE CONFIGURADO!');
+        console.log('\n📋 Credenciales de acceso:');
+        console.log('   Email: admin@eventosdisc.com');
+        console.log('   Password: admin123');
+        console.log('   URL: http://localhost:3000/login');
+      } else {
+        console.error('❌ Error creando usuario admin');
+      }
     }
 
-    // 4. Check carousel images
-    console.log('\n5. Verificando imágenes del carrusel...');
-    const { data: carouselImages, error: carouselError } = await supabase
-      .from('carousel_images')
-      .select('*')
-      .eq('is_active', true);
+    // 4. Verificar otras tablas importantes
+    console.log('\n3. Verificando estructura de base de datos...');
 
-    if (carouselError) {
-      console.log('❌ Error con carrusel:', carouselError.message);
-    } else {
-      console.log(`✅ Imágenes del carrusel: ${carouselImages.length}`);
-    }
+    const { count: businessesCount } = await supabase.from('businesses').select('*', { count: 'exact', head: true });
+    const { count: eventsCount } = await supabase.from('events').select('*', { count: 'exact', head: true });
+    const { count: siteConfigCount } = await supabase.from('site_config').select('*', { count: 'exact', head: true });
 
-    console.log('\n🎉 VERIFICACIÓN COMPLETADA');
-    console.log('\n🔐 Credenciales para login:');
-    console.log('Email: admin@eventosdisc.com');
-    console.log('Password: admin123');
+    console.log(`✅ Tabla businesses: ${businessesCount || 0} registros`);
+    console.log(`✅ Tabla events: ${eventsCount || 0} registros`);
+    console.log(`✅ Tabla site_config: ${siteConfigCount || 0} registros`);
 
   } catch (error) {
-    console.error('💥 Error fatal:', error);
+    console.error('❌ Error durante la verificación:', error);
   }
 }
 
-verifySupabase();
+verifyAndSetup();

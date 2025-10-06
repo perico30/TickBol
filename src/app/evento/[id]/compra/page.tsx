@@ -5,199 +5,213 @@ import { useParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
-import { Event, EventSector, Purchase, Ticket } from '@/types';
+import { Event } from '@/types';
 import { db } from '@/lib/database';
-import {
-  ArrowLeftIcon,
-  ArrowRightIcon,
-  CheckIcon,
-  ShoppingCartIcon,
-  QrCodeIcon,
-  CreditCardIcon,
-  TicketIcon,
-  MapPinIcon,
-  CalendarIcon,
-  ClockIcon
-} from 'lucide-react';
+import { ArrowLeft, ShoppingCart, MapPin, Users, DollarSign, CreditCard, MessageCircle, CheckCircle } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import QRCode from 'qrcode';
+import CroquisViewer from '@/components/CroquisViewer';
 
 interface PurchaseData {
-  // Paso 1
-  acceptedTerms: boolean;
-
-  // Paso 2
-  selectedSector: EventSector | null;
-  quantity: number;
-  subtotal: number;
-  total: number;
-
-  // Paso 3
-  selectedSeat: string;
-
-  // Paso 4
-  customerName: string;
-  customerPhone: string;
-  customerEmail: string;
-  paymentMethod: 'qr' | 'external';
-  paymentProof: string;
-
-  // Paso 5
-  verificationCode: string;
-  tickets: Ticket[];
+  name: string;
+  email: string;
+  phone: string;
+  ci: string;
+  notes: string;
 }
 
-const steps = [
-  { number: 1, title: 'Términos', description: 'Acepta condiciones' },
-  { number: 2, title: 'Selección', description: 'Sector y cantidad' },
-  { number: 3, title: 'Croquis', description: 'Elige tu lugar' },
-  { number: 4, title: 'Pago', description: 'Confirma compra' },
-  { number: 5, title: 'Ticket', description: 'Descarga entrada' }
-];
-
-export default function CompraPage() {
+export default function EventPurchasePage() {
   const params = useParams();
   const router = useRouter();
   const [event, setEvent] = useState<Event | null>(null);
-  const [currentStep, setCurrentStep] = useState(1);
+  const [sectors, setSectors] = useState<any[]>([]);
+  const [croquis, setCroquis] = useState<any>(null);
+  const [selectedSector, setSelectedSector] = useState<any>(null);
+  const [selectedSeats, setSelectedSeats] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
-
+  const [showPayment, setShowPayment] = useState(false);
   const [purchaseData, setPurchaseData] = useState<PurchaseData>({
-    acceptedTerms: false,
-    selectedSector: null,
-    quantity: 1,
-    subtotal: 0,
-    total: 0,
-    selectedSeat: '',
-    customerName: '',
-    customerPhone: '',
-    customerEmail: '',
-    paymentMethod: 'qr',
-    paymentProof: '',
-    verificationCode: '',
-    tickets: []
+    name: '',
+    email: '',
+    phone: '',
+    ci: '',
+    notes: ''
   });
 
   const id = params.id as string;
 
-  const loadEvent = async () => {
+  const loadEventData = async () => {
     try {
+      console.log('🔍 Loading event purchase data for ID:', id);
+
+      // Cargar evento
       const eventData = await db.getEventById(id);
-      if (eventData && eventData.status === 'approved') {
-        setEvent(eventData);
-      } else {
+      if (!eventData || eventData.status !== 'approved') {
+        console.log('❌ Event not found or not approved');
         router.push('/');
+        return;
       }
+
+      setEvent(eventData);
+      console.log('✅ Event loaded:', eventData.title);
+
+      // Cargar sectores del evento
+      try {
+        const sectorsData = await db.getEventSectors(id);
+        setSectors(sectorsData || []);
+        console.log('✅ Sectors loaded:', sectorsData?.length || 0);
+      } catch (error) {
+        console.error('Error loading sectors:', error);
+        setSectors([]);
+      }
+
+      // Cargar croquis si existe
+      if (eventData.croquisId) {
+        try {
+          const croquisData = await db.getCroquisById(eventData.croquisId);
+          setCroquis(croquisData);
+          console.log('✅ Croquis loaded:', croquisData?.name);
+        } catch (error) {
+          console.error('Error loading croquis:', error);
+          setCroquis(null);
+        }
+      }
+
     } catch (error) {
-      console.error('Error loading event:', error);
+      console.error('❌ Error loading event data:', error);
       router.push('/');
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadEvent();
+    loadEventData();
   }, [id, router]);
 
-  const updatePurchaseData = (field: keyof PurchaseData, value: any) => {
-    setPurchaseData(prev => ({
-      ...prev,
-      [field]: value
-    }));
+  const handleSectorSelect = (sector: any) => {
+    setSelectedSector(sector);
+    setSelectedSeats([]); // Limpiar selección previa
   };
 
-  const calculateTotal = (sector: EventSector, quantity: number) => {
-    const subtotal = sector.basePrice * quantity;
-    const total = subtotal; // Aquí podrías agregar impuestos o descuentos
-
-    updatePurchaseData('subtotal', subtotal);
-    updatePurchaseData('total', total);
-  };
-
-  const nextStep = () => {
-    if (currentStep < steps.length) {
-      setCurrentStep(currentStep + 1);
+  const handleSeatSelect = (seatId: string) => {
+    if (selectedSeats.includes(seatId)) {
+      setSelectedSeats(selectedSeats.filter(id => id !== seatId));
+    } else {
+      setSelectedSeats([...selectedSeats, seatId]);
     }
   };
 
-  const prevStep = () => {
-    if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
+  const calculateTotal = () => {
+    if (!selectedSector) return 0;
+    return selectedSector.price * selectedSeats.length;
+  };
+
+  const handleProceedToPayment = () => {
+    if (!selectedSector || selectedSeats.length === 0) {
+      alert('Por favor selecciona al menos un lugar');
+      return;
     }
+    setShowPayment(true);
   };
 
-  const canProceedStep1 = () => {
-    return purchaseData.acceptedTerms;
-  };
-
-  const canProceedStep2 = () => {
-    return purchaseData.selectedSector && purchaseData.quantity > 0;
-  };
-
-  const canProceedStep3 = () => {
-    return purchaseData.selectedSeat !== '';
-  };
-
-  const canProceedStep4 = () => {
-    return purchaseData.customerName && purchaseData.customerPhone &&
-           (purchaseData.paymentMethod === 'external' || purchaseData.paymentProof);
-  };
-
-  const processPurchase = async () => {
-    if (!event || !purchaseData.selectedSector) return;
-
-    setProcessing(true);
+  const handleCompletePurchase = async () => {
+    if (!purchaseData.name || !purchaseData.email || !purchaseData.phone) {
+      alert('Por favor completa todos los campos obligatorios');
+      return;
+    }
 
     try {
-      // Create purchase
-      const purchase = await db.createPurchase(purchaseData);
+      // Crear la compra
+      const purchase = {
+        eventId: id,
+        sectorId: selectedSector.id,
+        seats: selectedSeats,
+        customerData: purchaseData,
+        total: calculateTotal(),
+        status: 'pending_payment'
+      };
 
-      // Create tickets
-      const ticketsToCreate = Array.from({ length: purchaseData.quantity }, (_, index) => ({
-        sectorId: purchaseData.selectedSector!.id,
-        seatNumber: purchaseData.selectedSeat || `${index + 1}`,
-        customerName: purchaseData.customerName,
-        customerPhone: purchaseData.customerPhone
-      }));
-      const tickets = await db.createTicketsForPurchase(purchase.id, ticketsToCreate);
+      // Generar código de verificación
+      const verificationCode = Math.random().toString(36).substring(2, 15).toUpperCase();
 
-      // Update form data
-      updatePurchaseData('verificationCode', purchase.verificationCode);
+      // Mensaje de WhatsApp al negocio
+      const businessMessage = `🎫 NUEVA RESERVA - EventosDiscos
 
-      // Generate WhatsApp message
-      const message = `
-🎫 *Compra realizada exitosamente*
+📅 Evento: ${event?.title}
+👤 Cliente: ${purchaseData.name}
+📱 Teléfono: ${purchaseData.phone}
+📧 Email: ${purchaseData.email}
+🎯 Sector: ${selectedSector.name}
+🪑 Lugares: ${selectedSeats.length}
+💰 Total: Bs. ${calculateTotal()}
+📝 Código: ${verificationCode}
 
-📋 Código de verificación: ${purchase.verificationCode}
+${purchaseData.notes ? `📋 Notas: ${purchaseData.notes}` : ''}
 
-Para ver el estado de tu compra y entradas digitales, ingresa a:
-Para ver el estado de tu compra: ${window.location.origin}/entradas/${purchase.verificationCode}
+⚠️ IMPORTANTE: El cliente debe transferir el monto y enviar comprobante para confirmar la reserva.`;
 
-¡Gracias por tu compra! 🎉
-      `.trim();
+      const customerMessage = `🎫 RESERVA REALIZADA - EventosDiscos
 
-      // Send WhatsApp message
-      const whatsappUrl = `https://wa.me/591${purchaseData.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
+¡Gracias por tu reserva!
 
-      // Open WhatsApp
-      window.open(whatsappUrl, '_blank');
+📅 Evento: ${event?.title}
+🎯 Sector: ${selectedSector.name}
+🪑 Lugares reservados: ${selectedSeats.length}
+💰 Total a pagar: Bs. ${calculateTotal()}
+📝 Código de reserva: ${verificationCode}
 
-      // Go to next step
-      nextStep();
+📋 PASOS PARA CONFIRMAR:
+1️⃣ Realiza la transferencia del monto total
+2️⃣ Envía el comprobante por WhatsApp
+3️⃣ Espera la confirmación del negocio
+4️⃣ ¡Disfruta tu evento!
+
+❌ IMPORTANTE: Sin comprobante de pago la reserva será cancelada en 24 horas.`;
+
+      // URLs de WhatsApp
+      const businessPhone = event?.businessContact?.whatsapp || event?.businessContact?.phone || '78005026';
+      const businessWhatsApp = `https://wa.me/591${businessPhone.replace(/\D/g, '')}?text=${encodeURIComponent(businessMessage)}`;
+
+      // Mostrar confirmación y abrir WhatsApp
+      alert(`¡Reserva realizada exitosamente!
+
+Código: ${verificationCode}
+
+Ahora serás redirigido a WhatsApp para:
+1. Notificar al negocio sobre tu reserva
+2. Coordinar el pago y confirmación
+
+¡Guarda tu código de reserva!`);
+
+      // Abrir WhatsApp al negocio
+      window.open(businessWhatsApp, '_blank');
+
+      // Redirigir después de un momento
+      setTimeout(() => {
+        router.push(`/evento/${id}`);
+      }, 3000);
 
     } catch (error) {
-      console.error('Error procesando compra:', error);
-      alert('Error al procesar la compra. Por favor, intenta nuevamente.');
-    } finally {
-      setProcessing(false);
+      console.error('Error completing purchase:', error);
+      alert('Error al procesar la compra. Inténtalo nuevamente.');
     }
+  };
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('es-ES', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
   };
 
   if (loading) {
@@ -207,7 +221,7 @@ Para ver el estado de tu compra: ${window.location.origin}/entradas/${purchase.v
         <main className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Cargando proceso de compra...</p>
+            <p className="mt-4 text-gray-600">Cargando información de compra...</p>
           </div>
         </main>
         <Footer />
@@ -236,526 +250,318 @@ Para ver el estado de tu compra: ${window.location.origin}/entradas/${purchase.v
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <main className="flex-1 bg-gray-50 py-8">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-center space-x-4 mb-4">
+      <main className="flex-1 bg-gray-50">
+        {/* Hero Section */}
+        <div className="relative h-48 md:h-64">
+          <Image
+            src={event.image}
+            alt={event.title}
+            fill
+            className="object-cover"
+          />
+          <div className="absolute inset-0 bg-black bg-opacity-50 flex items-end">
+            <div className="container mx-auto px-4 pb-6">
               <Link
-                href={`/evento/${event.id}`}
-                className="flex items-center text-gray-600 hover:text-gray-900"
+                href={`/evento/${id}`}
+                className="inline-flex items-center text-white hover:text-gray-300 mb-4"
               >
-                <ArrowLeftIcon size={20} className="mr-2" />
+                <ArrowLeft size={16} className="mr-2" />
                 Volver al evento
               </Link>
-            </div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              Comprar Entradas
-            </h1>
-            <h2 className="text-xl text-gray-600">{event.title}</h2>
-          </div>
-
-          {/* Progress Bar */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
-              {steps.map((step, index) => (
-                <div key={step.number} className="flex items-center">
-                  <div className={`
-                    flex items-center justify-center w-10 h-10 rounded-full border-2
-                    ${currentStep >= step.number
-                      ? 'bg-blue-600 border-blue-600 text-white'
-                      : 'border-gray-300 text-gray-400'
-                    }
-                  `}>
-                    {currentStep > step.number ? (
-                      <CheckIcon size={20} />
-                    ) : (
-                      <span className="text-sm font-semibold">{step.number}</span>
-                    )}
-                  </div>
-                  <div className="ml-3 hidden md:block">
-                    <div className={`text-sm font-medium ${
-                      currentStep >= step.number ? 'text-blue-600' : 'text-gray-400'
-                    }`}>
-                      {step.title}
-                    </div>
-                    <div className="text-xs text-gray-500">{step.description}</div>
-                  </div>
-                  {index < steps.length - 1 && (
-                    <div className={`w-12 h-1 mx-4 ${
-                      currentStep > step.number ? 'bg-blue-600' : 'bg-gray-300'
-                    }`} />
-                  )}
-                </div>
-              ))}
+              <h1 className="text-2xl md:text-4xl font-bold text-white">
+                Compra tu entrada - {event.title}
+              </h1>
+              <p className="text-white mt-2">
+                {formatDate(event.date)} • {event.time} hrs • {event.location}
+              </p>
             </div>
           </div>
+        </div>
 
-          {/* Step Content */}
-          <Card className="mb-8">
-            <CardContent className="p-8">
-              {/* Paso 1: Términos y Condiciones */}
-              {currentStep === 1 && (
-                <div className="space-y-6">
-                  <div className="text-center mb-6">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                      Términos y Condiciones
-                    </h3>
-                    <p className="text-gray-600">
-                      Lee y acepta los términos para continuar
-                    </p>
-                  </div>
-
-                  <div className="bg-gray-100 p-6 rounded-lg max-h-64 overflow-y-auto">
-                    <h4 className="font-semibold mb-4">Términos y Condiciones de {event.businessName}</h4>
-                    <div className="space-y-3 text-sm text-gray-700">
-                      <p>1. Las entradas son válidas únicamente para el evento especificado en la fecha y hora indicadas.</p>
-                      <p>2. No se permiten devoluciones una vez confirmada la compra.</p>
-                      <p>3. Es obligatorio presentar la entrada digital y un documento de identidad en el acceso.</p>
-                      <p>4. Queda prohibido el ingreso de bebidas alcohólicas, armas, objetos cortopunzantes y sustancias ilegales.</p>
-                      <p>5. El organizador se reserva el derecho de admisión.</p>
-                      <p>6. En caso de cancelación del evento por causas de fuerza mayor, se procederá al reembolso.</p>
-                      <p>7. El cliente autoriza el tratamiento de sus datos personales conforme a la Ley de Protección de Datos.</p>
-                      <p>8. Cualquier reclamo debe realizarse dentro de las 24 horas posteriores al evento.</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center space-x-3">
-                    <input
-                      type="checkbox"
-                      id="acceptTerms"
-                      checked={purchaseData.acceptedTerms}
-                      onChange={(e) => updatePurchaseData('acceptedTerms', e.target.checked)}
-                      className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                    />
-                    <label htmlFor="acceptTerms" className="text-sm text-gray-700">
-                      Acepto los términos y condiciones
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {/* Paso 2: Selección de Sector y Cantidad */}
-              {currentStep === 2 && (
-                <div className="space-y-6">
-                  <div className="text-center mb-6">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                      Selecciona tu Sector
-                    </h3>
-                    <p className="text-gray-600">
-                      Elige el sector y cantidad de entradas
-                    </p>
-                  </div>
-
-                  <div className="grid gap-4">
-                    {event.sectors.map((sector) => (
-                      <div
-                        key={sector.id}
-                        className={`
-                          border rounded-lg p-4 cursor-pointer transition-all
-                          ${purchaseData.selectedSector?.id === sector.id
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 hover:border-gray-300'
-                          }
-                        `}
-                        onClick={() => {
-                          updatePurchaseData('selectedSector', sector);
-                          calculateTotal(sector, purchaseData.quantity);
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-3">
-                            <div
-                              className="w-4 h-4 rounded-full"
-                              style={{ backgroundColor: sector.color }}
-                            />
-                            <div>
-                              <h4 className="font-semibold">{sector.name}</h4>
-                              <p className="text-sm text-gray-600">
-                                Capacidad: {sector.capacity} personas
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-lg font-bold text-gray-900">
-                              Bs. {sector.basePrice}
-                            </div>
-                            <div className="text-sm text-gray-600">por entrada</div>
-                          </div>
-                        </div>
+        {/* Purchasing Section */}
+        <section className="py-8">
+          <div className="container mx-auto px-4">
+            <div className="grid lg:grid-cols-3 gap-8">
+              {/* Main Content */}
+              <div className="lg:col-span-2 space-y-6">
+                {/* Sectores disponibles */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Selecciona tu Sector</CardTitle>
+                    <CardDescription>
+                      Elige el tipo de entrada que prefieras
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {sectors.length === 0 ? (
+                      <div className="text-center py-8">
+                        <p className="text-gray-500">No hay sectores configurados para este evento</p>
+                        <p className="text-sm text-gray-400 mt-2">Contacta al organizador para más información</p>
                       </div>
-                    ))}
-                  </div>
-
-                  {purchaseData.selectedSector && (
-                    <div className="border-t pt-6">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                          <Label htmlFor="quantity">Cantidad de entradas</Label>
-                          <Select
-                            value={purchaseData.quantity.toString()}
-                            onValueChange={(value) => {
-                              const qty = parseInt(value);
-                              updatePurchaseData('quantity', qty);
-                              calculateTotal(purchaseData.selectedSector!, qty);
-                            }}
+                    ) : (
+                      <div className="grid md:grid-cols-2 gap-4">
+                        {sectors.map((sector) => (
+                          <div
+                            key={sector.id}
+                            className={`border rounded-lg p-4 cursor-pointer transition-all ${
+                              selectedSector?.id === sector.id
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                            onClick={() => handleSectorSelect(sector)}
                           >
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {[1,2,3,4,5,6,7,8,9,10].map(num => (
-                                <SelectItem key={num} value={num.toString()}>
-                                  {num} entrada{num > 1 ? 's' : ''}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="w-4 h-4 rounded-full border-2"
+                                  style={{ backgroundColor: sector.color }}
+                                ></div>
+                                <h3 className="font-semibold">{sector.name}</h3>
+                              </div>
+                              <Badge variant="outline">
+                                Bs. {sector.price}
+                              </Badge>
+                            </div>
+                            <div className="space-y-1 text-sm text-gray-600">
+                              <div className="flex items-center gap-2">
+                                <Users size={14} />
+                                <span>Capacidad: {sector.capacity} personas</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <DollarSign size={14} />
+                                <span>Precio por persona: Bs. {sector.price}</span>
+                              </div>
+                            </div>
+                            {sector.description && (
+                              <p className="text-sm text-gray-600 mt-2">{sector.description}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
 
+                {/* Croquis y selección de lugares */}
+                {selectedSector && croquis && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Selecciona tus Lugares</CardTitle>
+                      <CardDescription>
+                        Haz clic en las mesas/lugares disponibles del sector {selectedSector.name}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="bg-gray-50 rounded-lg p-4">
+                        <CroquisViewer
+                          croquis={croquis}
+                          sectors={sectors}
+                          showFilters={true}
+                          selectedSector={selectedSector}
+                          onSeatSelect={handleSeatSelect}
+                          selectedSeats={selectedSeats}
+                        />
+                      </div>
+
+                      {selectedSeats.length > 0 && (
+                        <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <h4 className="font-medium text-blue-800 mb-2">Lugares Seleccionados:</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {selectedSeats.map((seatId) => (
+                              <Badge key={seatId} variant="outline" className="bg-white">
+                                Mesa/Lugar {seatId}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Información sin croquis */}
+                {selectedSector && !croquis && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Sector Seleccionado</CardTitle>
+                      <CardDescription>
+                        Este evento no tiene croquis configurado
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <h3 className="font-semibold text-blue-800 mb-2">
+                          {selectedSector.name}
+                        </h3>
+                        <p className="text-blue-700">
+                          Precio: Bs. {selectedSector.price} por persona
+                        </p>
+                        <p className="text-sm text-blue-600 mt-2">
+                          Los lugares serán asignados por el organizador
+                        </p>
+                      </div>
+
+                      <div className="mt-4">
+                        <Label htmlFor="quantity">Cantidad de entradas</Label>
+                        <Input
+                          id="quantity"
+                          type="number"
+                          min="1"
+                          max={selectedSector.capacity}
+                          value={selectedSeats.length || 1}
+                          onChange={(e) => {
+                            const quantity = parseInt(e.target.value) || 1;
+                            setSelectedSeats(Array(quantity).fill('general'));
+                          }}
+                          className="mt-1 max-w-32"
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+
+              {/* Sidebar - Resumen de compra */}
+              <div>
+                <Card className="sticky top-4">
+                  <CardHeader>
+                    <CardTitle>Resumen de Compra</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {selectedSector ? (
+                      <>
                         <div className="space-y-2">
                           <div className="flex justify-between">
-                            <span>Subtotal:</span>
-                            <span>Bs. {purchaseData.subtotal}</span>
+                            <span>Sector:</span>
+                            <span className="font-medium">{selectedSector.name}</span>
                           </div>
+                          <div className="flex justify-between">
+                            <span>Cantidad:</span>
+                            <span className="font-medium">{selectedSeats.length || 0}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Precio unitario:</span>
+                            <span className="font-medium">Bs. {selectedSector.price}</span>
+                          </div>
+                          <hr />
                           <div className="flex justify-between text-lg font-bold">
                             <span>Total:</span>
-                            <span>Bs. {purchaseData.total}</span>
+                            <span>Bs. {calculateTotal()}</span>
                           </div>
                         </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
 
-              {/* Paso 3: Croquis Interactivo */}
-              {currentStep === 3 && (
-                <div className="space-y-6">
-                  <div className="text-center mb-6">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                      Selecciona tu Lugar
-                    </h3>
-                    <p className="text-gray-600">
-                      Elige tu mesa o asiento en el croquis
-                    </p>
-                  </div>
+                        {selectedSeats.length > 0 ? (
+                          <Dialog open={showPayment} onOpenChange={setShowPayment}>
+                            <DialogTrigger asChild>
+                              <Button
+                                className="w-full"
+                                size="lg"
+                                onClick={handleProceedToPayment}
+                              >
+                                <ShoppingCart size={16} className="mr-2" />
+                                Proceder al Pago
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-md">
+                              <DialogHeader>
+                                <DialogTitle>Datos de Compra</DialogTitle>
+                                <DialogDescription>
+                                  Completa tus datos para finalizar la reserva
+                                </DialogDescription>
+                              </DialogHeader>
 
-                  <div className="bg-gray-100 p-6 rounded-lg">
-                    <div className="text-center mb-4">
-                      <h4 className="font-semibold">Croquis del Evento</h4>
-                      <p className="text-sm text-gray-600 mb-4">
-                        Sector seleccionado: {purchaseData.selectedSector?.name}
-                      </p>
-                    </div>
-
-                    {/* Simulación de croquis */}
-                    <div className="grid grid-cols-4 gap-2 max-w-md mx-auto">
-                      {Array.from({ length: 16 }, (_, i) => {
-                        const seatId = `seat-${i + 1}`;
-                        const isSelected = purchaseData.selectedSeat === seatId;
-                        const isAvailable = Math.random() > 0.3; // Simulación de disponibilidad
-
-                        return (
-                          <button
-                            key={seatId}
-                            disabled={!isAvailable}
-                            onClick={() => updatePurchaseData('selectedSeat', seatId)}
-                            className={`
-                              h-12 w-12 rounded border-2 text-xs font-semibold
-                              ${isSelected
-                                ? 'bg-blue-600 border-blue-600 text-white'
-                                : isAvailable
-                                ? 'bg-green-100 border-green-300 text-green-800 hover:bg-green-200'
-                                : 'bg-red-100 border-red-300 text-red-800 cursor-not-allowed'
-                              }
-                            `}
-                          >
-                            {i + 1}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="flex justify-center space-x-6 mt-6 text-sm">
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 bg-green-100 border border-green-300 rounded"></div>
-                        <span>Libre</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 bg-blue-600 border border-blue-600 rounded"></div>
-                        <span>Seleccionado</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <div className="w-4 h-4 bg-red-100 border border-red-300 rounded"></div>
-                        <span>No disponible</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {purchaseData.selectedSeat && (
-                    <div className="bg-blue-50 p-4 rounded-lg">
-                      <h4 className="font-semibold text-blue-900">Lugar seleccionado:</h4>
-                      <p className="text-blue-800">
-                        Mesa/Asiento: {purchaseData.selectedSeat.replace('seat-', 'Mesa ')}
-                      </p>
-                      <p className="text-blue-800">
-                        Sector: {purchaseData.selectedSector?.name}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Paso 4: Pago */}
-              {currentStep === 4 && (
-                <div className="space-y-6">
-                  <div className="text-center mb-6">
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                      Información de Pago
-                    </h3>
-                    <p className="text-gray-600">
-                      Completa tus datos y realiza el pago
-                    </p>
-                  </div>
-
-                  {/* Resumen de compra */}
-                  <div className="bg-gray-50 p-6 rounded-lg">
-                    <h4 className="font-semibold mb-4">Resumen de tu compra</h4>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span>Evento:</span>
-                        <span className="font-medium">{event.title}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Fecha:</span>
-                        <span>{event.date} - {event.time}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Lugar:</span>
-                        <span>{event.location}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Sector:</span>
-                        <span>{purchaseData.selectedSector?.name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Mesa/Asiento:</span>
-                        <span>{purchaseData.selectedSeat.replace('seat-', 'Mesa ')}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Cantidad:</span>
-                        <span>{purchaseData.quantity} entrada(s)</span>
-                      </div>
-                      <div className="border-t pt-2 flex justify-between text-lg font-bold">
-                        <span>Total:</span>
-                        <span>Bs. {purchaseData.total}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Datos del cliente */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="customerName">Nombre Completo *</Label>
-                      <Input
-                        id="customerName"
-                        value={purchaseData.customerName}
-                        onChange={(e) => updatePurchaseData('customerName', e.target.value)}
-                        placeholder="Tu nombre completo"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="customerPhone">Teléfono *</Label>
-                      <Input
-                        id="customerPhone"
-                        value={purchaseData.customerPhone}
-                        onChange={(e) => updatePurchaseData('customerPhone', e.target.value)}
-                        placeholder="Ej: 78123456"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="customerEmail">Email</Label>
-                    <Input
-                      id="customerEmail"
-                      type="email"
-                      value={purchaseData.customerEmail}
-                      onChange={(e) => updatePurchaseData('customerEmail', e.target.value)}
-                      placeholder="tu@email.com"
-                    />
-                  </div>
-
-                  {/* Métodos de pago */}
-                  <div>
-                    <h4 className="font-semibold mb-4">Método de Pago</h4>
-                    <div className="space-y-4">
-                      {event.paymentInfo?.qrUrl && (
-                        <div
-                          className={`border rounded-lg p-4 cursor-pointer ${
-                            purchaseData.paymentMethod === 'qr' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                          }`}
-                          onClick={() => updatePurchaseData('paymentMethod', 'qr')}
-                        >
-                          <div className="flex items-center space-x-3 mb-4">
-                            <QrCodeIcon className="h-5 w-5" />
-                            <span className="font-medium">Pago con QR</span>
-                          </div>
-
-                          {purchaseData.paymentMethod === 'qr' && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div className="text-center">
-                                <Image
-                                  src={event.paymentInfo.qrUrl}
-                                  alt="QR de Pago"
-                                  width={200}
-                                  height={200}
-                                  className="mx-auto"
-                                />
-                              </div>
-                              <div>
-                                <p className="text-sm text-gray-600 mb-3">
-                                  {event.paymentInfo.instructions}
-                                </p>
-                                <div className="bg-blue-100 p-3 rounded">
-                                  <p className="text-blue-800 font-semibold">
-                                    Total a pagar: Bs. {purchaseData.total}
-                                  </p>
-                                </div>
-
-                                <div className="mt-4">
-                                  <Label>Subir Comprobante *</Label>
+                              <div className="space-y-4">
+                                <div>
+                                  <Label htmlFor="name">Nombre Completo *</Label>
                                   <Input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={(e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        // En implementación real, subirías a un servidor
-                                        updatePurchaseData('paymentProof', URL.createObjectURL(file));
-                                      }
-                                    }}
+                                    id="name"
+                                    value={purchaseData.name}
+                                    onChange={(e) => setPurchaseData({...purchaseData, name: e.target.value})}
+                                    placeholder="Tu nombre completo"
                                     className="mt-1"
                                   />
                                 </div>
+
+                                <div>
+                                  <Label htmlFor="email">Email *</Label>
+                                  <Input
+                                    id="email"
+                                    type="email"
+                                    value={purchaseData.email}
+                                    onChange={(e) => setPurchaseData({...purchaseData, email: e.target.value})}
+                                    placeholder="tu@email.com"
+                                    className="mt-1"
+                                  />
+                                </div>
+
+                                <div>
+                                  <Label htmlFor="phone">Teléfono/WhatsApp *</Label>
+                                  <Input
+                                    id="phone"
+                                    value={purchaseData.phone}
+                                    onChange={(e) => setPurchaseData({...purchaseData, phone: e.target.value})}
+                                    placeholder="70123456"
+                                    className="mt-1"
+                                  />
+                                </div>
+
+                                <div>
+                                  <Label htmlFor="ci">Carnet de Identidad</Label>
+                                  <Input
+                                    id="ci"
+                                    value={purchaseData.ci}
+                                    onChange={(e) => setPurchaseData({...purchaseData, ci: e.target.value})}
+                                    placeholder="12345678"
+                                    className="mt-1"
+                                  />
+                                </div>
+
+                                <div>
+                                  <Label htmlFor="notes">Notas adicionales</Label>
+                                  <Textarea
+                                    id="notes"
+                                    value={purchaseData.notes}
+                                    onChange={(e) => setPurchaseData({...purchaseData, notes: e.target.value})}
+                                    placeholder="Alguna solicitud especial..."
+                                    className="mt-1"
+                                  />
+                                </div>
+
+                                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                  <p className="text-sm text-yellow-800">
+                                    <strong>Importante:</strong> Después de confirmar serás redirigido a WhatsApp para coordinar el pago con el organizador.
+                                  </p>
+                                </div>
+
+                                <Button
+                                  onClick={handleCompletePurchase}
+                                  className="w-full"
+                                  size="lg"
+                                >
+                                  <MessageCircle size={16} className="mr-2" />
+                                  Confirmar Reserva
+                                </Button>
                               </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div
-                        className={`border rounded-lg p-4 cursor-pointer ${
-                          purchaseData.paymentMethod === 'external' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
-                        }`}
-                        onClick={() => updatePurchaseData('paymentMethod', 'external')}
-                      >
-                        <div className="flex items-center space-x-3">
-                          <CreditCardIcon className="h-5 w-5" />
-                          <span className="font-medium">Pago en Línea</span>
-                          <Badge variant="outline">Próximamente</Badge>
-                        </div>
-                        <p className="text-sm text-gray-600 mt-2">
-                          Paga con tarjeta de crédito o débito
-                        </p>
+                            </DialogContent>
+                          </Dialog>
+                        ) : (
+                          <Button disabled className="w-full" size="lg">
+                            Selecciona lugares
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-center py-6">
+                        <p className="text-gray-500 mb-2">Selecciona un sector</p>
+                        <p className="text-sm text-gray-400">para ver el resumen de compra</p>
                       </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Paso 5: Ticket Digital */}
-              {currentStep === 5 && (
-                <div className="space-y-6 text-center">
-                  <div className="mb-6">
-                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <CheckIcon className="h-8 w-8 text-green-600" />
-                    </div>
-                    <h3 className="text-2xl font-bold text-gray-900 mb-2">
-                      ¡Compra Realizada!
-                    </h3>
-                    <p className="text-gray-600">
-                      Tu solicitud de compra ha sido enviada
-                    </p>
-                  </div>
-
-                  <div className="bg-blue-50 p-6 rounded-lg text-left">
-                    <h4 className="font-semibold text-blue-900 mb-3">Código de Verificación:</h4>
-                    <p className="text-2xl font-mono font-bold text-blue-900 mb-4">
-                      {purchaseData.verificationCode}
-                    </p>
-                    <p className="text-blue-800 text-sm mb-4">
-                      Guarda este código. Te hemos enviado un mensaje por WhatsApp con toda la información.
-                    </p>
-                    <div className="space-y-2 text-sm">
-                      <p><strong>Próximos pasos:</strong></p>
-                      <p>1. El organizador verificará tu pago en 24-48 horas</p>
-                      <p>2. Recibirás un WhatsApp cuando tus entradas estén listas</p>
-                      <p>3. Podrás descargar tus tickets digitales</p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                    <Button asChild>
-                      <Link href={`/entradas/${purchaseData.verificationCode}`}>
-                        <TicketIcon className="h-4 w-4 mr-2" />
-                        Ver Estado de Compra
-                      </Link>
-                    </Button>
-
-                    <Button variant="outline" asChild>
-                      <Link href="/">
-                        Volver al Inicio
-                      </Link>
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Navigation Buttons */}
-          {currentStep < 5 && (
-            <div className="flex justify-between">
-              <Button
-                variant="outline"
-                onClick={prevStep}
-                disabled={currentStep === 1}
-                className="flex items-center space-x-2"
-              >
-                <ArrowLeftIcon size={16} />
-                <span>Anterior</span>
-              </Button>
-
-              {currentStep === 4 ? (
-                <Button
-                  onClick={processPurchase}
-                  disabled={!canProceedStep4() || processing}
-                  className="flex items-center space-x-2 bg-green-600 hover:bg-green-700"
-                >
-                  <ShoppingCartIcon size={16} />
-                  <span>{processing ? 'Procesando...' : 'Confirmar Compra'}</span>
-                </Button>
-              ) : (
-                <Button
-                  onClick={nextStep}
-                  disabled={
-                    (currentStep === 1 && !canProceedStep1()) ||
-                    (currentStep === 2 && !canProceedStep2()) ||
-                    (currentStep === 3 && !canProceedStep3())
-                  }
-                  className="flex items-center space-x-2"
-                >
-                  <span>Siguiente</span>
-                  <ArrowRightIcon size={16} />
-                </Button>
-              )}
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        </section>
       </main>
 
       <Footer />

@@ -1,750 +1,591 @@
 import { supabase } from './supabase';
-import { User, Business, Event, SiteConfig, CarouselImage, Ticket, Purchase, VerificationCode, CroquisTemplate } from '@/types';
 import bcrypt from 'bcryptjs';
+import type {
+  User,
+  Event,
+  Business,
+  Purchase,
+  Ticket,
+  EventSector,
+  EventCombo,
+  SeatMapElement,
+  CroquisTemplate,
+  SiteConfig,
+  CarouselImage,
+  VerificationCode
+} from '@/types';
 
-// Base de datos con Supabase - VERSIÓN PRODUCCIÓN
-class SupabaseDatabase {
+// =============================================================================
+// USUARIOS
+// =============================================================================
 
-  // ====================================================
-  // UTILIDADES PRIVADAS
-  // ====================================================
+async function addUser(userData: {
+  email: string;
+  password: string;
+  name: string;
+  role: User['role'];
+  businessId?: string;
+  createdBy?: string;
+  permissions?: Record<string, any>;
+}): Promise<User | null> {
+  try {
+    const hashedPassword = await bcrypt.hash(userData.password, 10);
 
-  private async handleDatabaseError(error: any, operation: string, defaultReturn: any = null) {
-    if (error?.message?.includes('Could not find the table') ||
-        error?.message?.includes('relation') && error?.message?.includes('does not exist')) {
-      console.warn(`⚠️ Tabla no existe para operación: ${operation}. Retornando valor por defecto.`);
-      return defaultReturn;
+    const { data, error } = await supabase
+      .from('users')
+      .insert({
+        email: userData.email,
+        password_hash: hashedPassword,
+        name: userData.name,
+        role: userData.role,
+        business_id: userData.businessId || null,
+        created_by: userData.createdBy || null,
+        permissions: userData.permissions || {}
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding user:', error);
+      return null;
     }
 
-    // Log más detallado para debugging
-    console.error(`❌ Error en ${operation}:`, {
-      message: error?.message,
-      code: error?.code,
-      details: error?.details,
-      hint: error?.hint,
-      error: error
-    });
-
-    return defaultReturn;
-  }
-
-  private async hashPassword(password: string): Promise<string> {
-    return await bcrypt.hash(password, 10);
-  }
-
-  private async verifyPassword(password: string, hash: string): Promise<boolean> {
-    return await bcrypt.compare(password, hash);
-  }
-
-  private generateVerificationCode(): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  }
-
-  private generateQRCode(): string {
-    return 'QR-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-  }
-
-  private generateRandomPassword(length: number): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let password = '';
-    for (let i = 0; i < length; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return password;
-  }
-
-  // ====================================================
-  // USERS
-  // ====================================================
-
-  async getUsers(): Promise<User[]> {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        return this.handleDatabaseError(error, 'getUsers', []);
-      }
-
-      return data.map(this.mapUserFromDB);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getUsers', []);
-    }
-  }
-
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email)
-        .single();
-
-      if (error) {
-        return this.handleDatabaseError(error, 'getUserByEmail', undefined);
-      }
-      return this.mapUserFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getUserByEmail', undefined);
-    }
-  }
-
-  async getUserById(id: string): Promise<User | undefined> {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error) {
-        return this.handleDatabaseError(error, 'getUserById', undefined);
-      }
-      return this.mapUserFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getUserById', undefined);
-    }
-  }
-
-  async addUser(userData: Omit<User, 'id'>): Promise<User | null> {
-    try {
-      const hashedPassword = await this.hashPassword(userData.password);
-
-      const { data, error } = await supabase
-        .from('users')
-        .insert({
-          email: userData.email,
-          password_hash: hashedPassword,
-          name: userData.name,
-          role: userData.role,
-          business_id: userData.businessId || null,
-          created_by: userData.createdBy || null,
-          permissions: userData.permissions || {}
-        })
-        .select()
-        .single();
-
-      if (error) {
-        return this.handleDatabaseError(error, 'addUser', null);
-      }
-
-      return this.mapUserFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'addUser', null);
-    }
-  }
-
-  async updateUser(userId: string, updates: Partial<User>): Promise<User | null> {
-    try {
-      const updateData: any = {};
-
-      if (updates.email) updateData.email = updates.email;
-      if (updates.name) updateData.name = updates.name;
-      if (updates.role) updateData.role = updates.role;
-      if (updates.businessId !== undefined) updateData.business_id = updates.businessId;
-      if (updates.permissions) updateData.permissions = updates.permissions;
-      if (updates.password) updateData.password_hash = await this.hashPassword(updates.password);
-
-      const { data, error } = await supabase
-        .from('users')
-        .update(updateData)
-        .eq('id', userId)
-        .select()
-        .single();
-
-      if (error) {
-        return this.handleDatabaseError(error, 'updateUser', null);
-      }
-
-      return this.mapUserFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'updateUser', null);
-    }
-  }
-
-  async authenticateUser(email: string, password: string): Promise<User | null> {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email)
-        .single();
-
-      if (error) {
-        return this.handleDatabaseError(error, 'authenticateUser', null);
-      }
-
-      const isValidPassword = await this.verifyPassword(password, data.password_hash);
-      if (!isValidPassword) return null;
-
-      return this.mapUserFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'authenticateUser', null);
-    }
-  }
-
-  // ====================================================
-  // PORTERÍA USER MANAGEMENT
-  // ====================================================
-
-  async createPorteriaUser(userData: {
-    name: string;
-    email: string;
-    password: string;
-    businessId: string;
-    createdBy: string;
-    permissions?: {
-      canValidateTickets?: boolean;
-      canViewStats?: boolean;
-      allowedEvents?: string[];
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      role: data.role,
+      businessId: data.business_id,
+      createdBy: data.created_by,
+      permissions: data.permissions,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
     };
-  }): Promise<User | null> {
-    const user = await this.addUser({
-      name: userData.name,
-      email: userData.email,
-      password: userData.password,
-      role: 'porteria',
-      businessId: userData.businessId,
-      createdBy: userData.createdBy,
-      permissions: {
-        canValidateTickets: true,
-        canViewStats: true,
-        ...userData.permissions
-      }
-    });
-
-    return user;
+  } catch (error) {
+    console.error('Exception adding user:', error);
+    return null;
   }
+}
 
-  async getPorteriaUsersByBusinessId(businessId: string): Promise<User[]> {
+async function authenticateUser(email: string, password: string): Promise<User | null> {
+  try {
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .eq('role', 'porteria')
-      .eq('business_id', businessId)
+      .eq('email', email)
+      .single();
+
+    if (error || !data) {
+      console.log('User not found:', email);
+      return null;
+    }
+
+    const passwordMatch = await bcrypt.compare(password, data.password_hash);
+    if (!passwordMatch) {
+      console.log('Invalid password for:', email);
+      return null;
+    }
+
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      role: data.role,
+      businessId: data.business_id,
+      createdBy: data.created_by,
+      permissions: data.permissions,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception authenticating user:', error);
+    return null;
+  }
+}
+
+async function getUserById(id: string): Promise<User | null> {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return {
+      id: data.id,
+      email: data.email,
+      name: data.name,
+      role: data.role,
+      businessId: data.business_id,
+      createdBy: data.created_by,
+      permissions: data.permissions,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception getting user by ID:', error);
+    return null;
+  }
+}
+
+async function getAllUsers(): Promise<User[]> {
+  try {
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Error fetching porteria users:', error);
+      console.error('Error getting all users:', error);
       return [];
     }
 
-    return data.map(this.mapUserFromDB);
+    return data.map(user => ({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      businessId: user.business_id,
+      createdBy: user.created_by,
+      permissions: user.permissions,
+      createdAt: user.created_at,
+      updatedAt: user.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting all users:', error);
+    return [];
   }
+}
 
-  async updatePorteriaUser(userId: string, updates: Partial<User>): Promise<boolean> {
-    const updateData: any = {};
+// =============================================================================
+// NEGOCIOS
+// =============================================================================
 
-    if (updates.name) updateData.name = updates.name;
-    if (updates.email) updateData.email = updates.email;
-    if (updates.permissions) updateData.permissions = updates.permissions;
-    if (updates.password) updateData.password_hash = await this.hashPassword(updates.password);
-
-    const { error } = await supabase
-      .from('users')
-      .update(updateData)
-      .eq('id', userId)
-      .eq('role', 'porteria');
+async function addBusiness(businessData: {
+  name: string;
+  email: string;
+  phone: string;
+  address?: string;
+  logo?: string;
+  description?: string;
+  ownerId?: string;
+  paymentQrUrl?: string;
+  paymentInstructions?: string;
+}): Promise<Business | null> {
+  try {
+    const { data, error } = await supabase
+      .from('businesses')
+      .insert({
+        name: businessData.name,
+        email: businessData.email,
+        phone: businessData.phone,
+        address: businessData.address,
+        logo: businessData.logo,
+        description: businessData.description,
+        owner_id: businessData.ownerId,
+        payment_qr_url: businessData.paymentQrUrl,
+        payment_instructions: businessData.paymentInstructions
+      })
+      .select()
+      .single();
 
     if (error) {
-      console.error('Error updating porteria user:', error);
-      return false;
-    }
-
-    return true;
-  }
-
-  async deletePorteriaUser(userId: string): Promise<boolean> {
-    const { error } = await supabase
-      .from('users')
-      .delete()
-      .eq('id', userId)
-      .eq('role', 'porteria');
-
-    if (error) {
-      console.error('Error deleting porteria user:', error);
-      return false;
-    }
-
-    return true;
-  }
-
-  generatePorteriaCredentials(): { email: string; password: string } {
-    const timestamp = Date.now().toString().slice(-6);
-    return {
-      email: `porteria${timestamp}@temp.local`,
-      password: this.generateRandomPassword(8)
-    };
-  }
-
-  // ====================================================
-  // BUSINESSES
-  // ====================================================
-
-  async getBusinesses(): Promise<Business[]> {
-    try {
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        return this.handleDatabaseError(error, 'getBusinesses', []);
-      }
-
-      return data.map(this.mapBusinessFromDB);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getBusinesses', []);
-    }
-  }
-
-  async getBusinessById(id: string): Promise<Business | undefined> {
-    try {
-      const { data, error } = await supabase
-        .from('businesses')
-        .select('*')
-        .eq('id', id)
-        .single();
-
-      if (error) {
-        return this.handleDatabaseError(error, 'getBusinessById', undefined);
-      }
-      return this.mapBusinessFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getBusinessById', undefined);
-    }
-  }
-
-  async addBusiness(businessData: Omit<Business, 'id'>): Promise<Business | null> {
-    try {
-      const { data, error } = await supabase
-        .from('businesses')
-        .insert({
-          name: businessData.name,
-          email: businessData.email,
-          phone: businessData.phone,
-          address: businessData.address || null,
-          logo: businessData.logo || null,
-          description: businessData.description || null,
-          owner_id: businessData.ownerId,
-          payment_qr_url: businessData.paymentQrUrl || null,
-          payment_instructions: businessData.paymentInstructions || null
-        })
-        .select()
-        .single();
-
-      if (error) {
-        return this.handleDatabaseError(error, 'addBusiness', null);
-      }
-
-      return this.mapBusinessFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'addBusiness', null);
-    }
-  }
-
-  // ====================================================
-  // EVENTS
-  // ====================================================
-
-  async getEvents(): Promise<Event[]> {
-    try {
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          *,
-          event_sectors(*),
-          event_combos(*),
-          reservation_conditions(*),
-          seat_map_elements(*)
-        `)
-        .eq('is_active', true)
-        .eq('status', 'approved')
-        .order('date', { ascending: true });
-
-      if (error) {
-        return this.handleDatabaseError(error, 'getEvents', []);
-      }
-
-      return data.map(this.mapEventFromDB);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getEvents', []);
-    }
-  }
-
-  async getAllEvents(): Promise<Event[]> {
-    try {
-      console.log('🔍 Fetching all events (including inactive for admin)...');
-
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          *,
-          event_sectors(*),
-          event_combos(*),
-          reservation_conditions(*),
-          seat_map_elements(*)
-        `)
-        // Removido el filtro .eq('is_active', true) para que el admin pueda ver todos los eventos
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('❌ Error fetching all events:', error);
-        return this.handleDatabaseError(error, 'getAllEvents', []);
-      }
-
-      console.log(`✅ Found ${data?.length || 0} total events`);
-      return data.map(this.mapEventFromDB);
-    } catch (error) {
-      console.error('❌ Exception in getAllEvents:', error);
-      return this.handleDatabaseError(error, 'getAllEvents', []);
-    }
-  }
-
-  async getEventById(id: string): Promise<Event | undefined> {
-    try {
-      // Primero intenta obtener el evento con todas las relaciones
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          *,
-          event_sectors(*),
-          event_combos(*),
-          reservation_conditions(*),
-          seat_map_elements(*)
-        `)
-        .eq('id', id)
-        .single();
-
-      if (error) {
-        console.warn('⚠️ Error getting event with relations, trying basic event:', error.message);
-
-        // Si falla, intenta obtener solo el evento básico
-        const { data: basicData, error: basicError } = await supabase
-          .from('events')
-          .select('*')
-          .eq('id', id)
-          .single();
-
-        if (basicError) {
-          return this.handleDatabaseError(basicError, 'getEventById', undefined);
-        }
-
-        // Retorna evento básico sin relaciones
-        return this.mapEventFromDB({
-          ...basicData,
-          event_sectors: [],
-          event_combos: [],
-          reservation_conditions: [],
-          seat_map_elements: []
-        });
-      }
-
-      return this.mapEventFromDB(data);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getEventById', undefined);
-    }
-  }
-
-  async getEventsByBusinessId(businessId: string): Promise<Event[]> {
-    try {
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          *,
-          event_sectors(*),
-          event_combos(*),
-          reservation_conditions(*),
-          seat_map_elements(*)
-        `)
-        .eq('business_id', businessId)
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        return this.handleDatabaseError(error, 'getEventsByBusinessId', []);
-      }
-
-      return data.map(this.mapEventFromDB);
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getEventsByBusinessId', []);
-    }
-  }
-
-  async getPendingEvents(): Promise<Event[]> {
-    try {
-      console.log('🔍 Fetching pending events for admin approval...');
-
-      const { data, error } = await supabase
-        .from('events')
-        .select(`
-          *,
-          event_sectors(*),
-          event_combos(*),
-          reservation_conditions(*),
-          seat_map_elements(*)
-        `)
-        .eq('status', 'pending')
-        // Removido el filtro .eq('is_active', true) porque los eventos pendientes
-        // pueden estar inactivos hasta ser aprobados
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('❌ Error fetching pending events:', error);
-        return this.handleDatabaseError(error, 'getPendingEvents', []);
-      }
-
-      console.log(`✅ Found ${data?.length || 0} pending events`);
-      return data.map(this.mapEventFromDB);
-    } catch (error) {
-      console.error('❌ Exception in getPendingEvents:', error);
-      return this.handleDatabaseError(error, 'getPendingEvents', []);
-    }
-  }
-
-  async addEvent(eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>): Promise<Event | null> {
-    try {
-      console.log('📅 Starting simplified event creation...');
-
-      // Función auxiliar para truncar texto de manera segura
-      const safeTruncate = (text: string | undefined, maxLength: number): string => {
-        if (!text || typeof text !== 'string') return '';
-        return text.length > maxLength ? text.substring(0, maxLength) : text;
-      };
-
-      // Función para procesar imagen de manera segura
-      const safeProcessImage = (imageUrl?: string): string => {
-        const defaultImage = 'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800&h=600&fit=crop';
-
-        if (!imageUrl || typeof imageUrl !== 'string') return defaultImage;
-
-        // Si es base64 muy largo, usar imagen por defecto
-        if (imageUrl.startsWith('data:image/') && imageUrl.length > 500) {
-          console.warn('⚠️ Image base64 too long, using default');
-          return defaultImage;
-        }
-
-        // Si es URL muy larga, usar imagen por defecto
-        if (imageUrl.length > 300) {
-          console.warn('⚠️ Image URL too long, using default');
-          return defaultImage;
-        }
-
-        return imageUrl;
-      };
-
-      // Preparar datos del evento de manera segura y simple
-      const safeEventData = {
-        title: safeTruncate(eventData.title, 100),
-        description: safeTruncate(eventData.description, 500),
-        date: eventData.date || new Date().toISOString().split('T')[0],
-        time: eventData.time || '20:00',
-        location: safeTruncate(eventData.location, 200),
-        city: safeTruncate(eventData.city, 50),
-        image: safeProcessImage(eventData.image),
-        price: Math.max(1, Math.min(10000, eventData.price || 50)),
-        business_id: eventData.businessId,
-        business_name: safeTruncate(eventData.businessName, 100),
-        max_capacity: Math.max(1, Math.min(10000, eventData.maxCapacity || 100)),
-        current_sales: Math.max(0, eventData.currentSales || 0),
-        status: eventData.status || 'pending',
-        is_active: Boolean(eventData.isActive),
-        business_contact: eventData.businessContact || {},
-        payment_info: eventData.paymentInfo || {}
-      };
-
-      console.log('💾 Inserting event with safe data:', safeEventData.title);
-
-      // Insertar solo el evento principal
-      const { data: eventResult, error: eventError } = await supabase
-        .from('events')
-        .insert(safeEventData)
-        .select()
-        .single();
-
-      if (eventError) {
-        console.error('❌ Database error:', eventError.message);
-        console.error('❌ Error code:', eventError.code);
-        console.error('❌ Error details:', eventError.details);
-        return null;
-      }
-
-      if (!eventResult) {
-        console.error('❌ No result returned from database');
-        return null;
-      }
-
-      console.log('✅ Event created successfully! ID:', eventResult.id);
-
-      // Retornar evento exitoso inmediatamente
-      const successEvent: Event = {
-        id: eventResult.id,
-        title: safeEventData.title,
-        description: safeEventData.description,
-        date: safeEventData.date,
-        time: safeEventData.time,
-        location: safeEventData.location,
-        city: safeEventData.city,
-        image: safeEventData.image,
-        price: safeEventData.price,
-        businessId: safeEventData.business_id,
-        businessName: safeEventData.business_name,
-        maxCapacity: safeEventData.max_capacity,
-        currentSales: safeEventData.current_sales,
-        isActive: safeEventData.is_active,
-        status: safeEventData.status,
-        createdAt: eventResult.created_at || new Date().toISOString(),
-        updatedAt: eventResult.updated_at || new Date().toISOString(),
-        sectors: eventData.sectors || [],
-        combos: eventData.combos || [],
-        reservationConditions: eventData.reservationConditions || [],
-        seatMapElements: eventData.seatMapElements || [],
-        businessContact: safeEventData.business_contact,
-        paymentInfo: safeEventData.payment_info,
-        rejectionReason: undefined
-      };
-
-      console.log('🎉 Event creation completed successfully!');
-      return successEvent;
-
-    } catch (error) {
-      console.error('❌ Exception during event creation:', error);
-      if (error instanceof Error) {
-        console.error('❌ Error message:', error.message);
-        console.error('❌ Error stack:', error.stack);
-      }
+      console.error('Error adding business:', error);
       return null;
     }
+
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      address: data.address,
+      logo: data.logo,
+      description: data.description,
+      ownerId: data.owner_id,
+      paymentQrUrl: data.payment_qr_url,
+      paymentInstructions: data.payment_instructions,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception adding business:', error);
+    return null;
   }
+}
 
-  async updateEvent(id: string, updates: Partial<Event>): Promise<boolean> {
-    const updateData: any = {};
-
-    if (updates.title) updateData.title = updates.title;
-    if (updates.description !== undefined) updateData.description = updates.description;
-    if (updates.date) updateData.date = updates.date;
-    if (updates.time) updateData.time = updates.time;
-    if (updates.location) updateData.location = updates.location;
-    if (updates.city) updateData.city = updates.city;
-    if (updates.image) updateData.image = updates.image;
-    if (updates.price) updateData.price = updates.price;
-    if (updates.maxCapacity !== undefined) updateData.max_capacity = updates.maxCapacity;
-    if (updates.currentSales !== undefined) updateData.current_sales = updates.currentSales;
-    if (updates.status) updateData.status = updates.status;
-    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
-    if (updates.rejectionReason !== undefined) updateData.rejection_reason = updates.rejectionReason;
-    if (updates.businessContact) updateData.business_contact = updates.businessContact;
-    if (updates.paymentInfo) updateData.payment_info = updates.paymentInfo;
-
-    const { error } = await supabase
-      .from('events')
-      .update(updateData)
-      .eq('id', id);
+async function getAllBusinesses(): Promise<Business[]> {
+  try {
+    const { data, error } = await supabase
+      .from('businesses')
+      .select('*')
+      .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('Error updating event:', error);
+      console.error('Error getting all businesses:', error);
+      return [];
+    }
+
+    return data.map(business => ({
+      id: business.id,
+      name: business.name,
+      email: business.email,
+      phone: business.phone,
+      address: business.address,
+      logo: business.logo,
+      description: business.description,
+      ownerId: business.owner_id,
+      paymentQrUrl: business.payment_qr_url,
+      paymentInstructions: business.payment_instructions,
+      createdAt: business.created_at,
+      updatedAt: business.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting all businesses:', error);
+    return [];
+  }
+}
+
+async function getBusinessById(id: string): Promise<Business | null> {
+  try {
+    const { data, error } = await supabase
+      .from('businesses')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      phone: data.phone,
+      address: data.address,
+      logo: data.logo,
+      description: data.description,
+      ownerId: data.owner_id,
+      paymentQrUrl: data.payment_qr_url,
+      paymentInstructions: data.payment_instructions,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception getting business by ID:', error);
+    return null;
+  }
+}
+
+// =============================================================================
+// EVENTOS
+// =============================================================================
+
+async function addEvent(eventData: {
+  title: string;
+  description: string;
+  date: string;
+  time: string;
+  image?: string;
+  businessId: string;
+  status?: Event['status'];
+  totalCapacity?: number;
+  seatMapData?: any;
+}): Promise<Event | null> {
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .insert({
+        title: eventData.title,
+        description: eventData.description,
+        date: eventData.date,
+        time: eventData.time,
+        image: eventData.image,
+        business_id: eventData.businessId,
+        status: eventData.status || 'pending',
+        total_capacity: eventData.totalCapacity,
+        seat_map_data: eventData.seatMapData
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding event:', error);
+      return null;
+    }
+
+    return {
+      id: data.id,
+      title: data.title,
+      description: data.description,
+      date: data.date,
+      time: data.time,
+      image: data.image,
+      businessId: data.business_id,
+      status: data.status,
+      totalCapacity: data.total_capacity,
+      seatMapData: data.seat_map_data,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception adding event:', error);
+    return null;
+  }
+}
+
+async function getAllEvents(): Promise<Event[]> {
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .order('date', { ascending: true });
+
+    if (error) {
+      console.error('Error getting all events:', error);
+      return [];
+    }
+
+    return data.map(event => ({
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      date: event.date,
+      time: event.time,
+      image: event.image,
+      businessId: event.business_id,
+      status: event.status,
+      totalCapacity: event.total_capacity,
+      seatMapData: event.seat_map_data,
+      createdAt: event.created_at,
+      updatedAt: event.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting all events:', error);
+    return [];
+  }
+}
+
+async function getEventById(id: string): Promise<Event | null> {
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return {
+      id: data.id,
+      title: data.title,
+      description: data.description,
+      date: data.date,
+      time: data.time,
+      image: data.image,
+      businessId: data.business_id,
+      status: data.status,
+      totalCapacity: data.total_capacity,
+      seatMapData: data.seat_map_data,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception getting event by ID:', error);
+    return null;
+  }
+}
+
+async function updateEventStatus(eventId: string, status: Event['status']): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('events')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', eventId);
+
+    if (error) {
+      console.error('Error updating event status:', error);
       return false;
     }
 
     return true;
+  } catch (error) {
+    console.error('Exception updating event status:', error);
+    return false;
   }
+}
 
-  async deleteEvent(id: string): Promise<boolean> {
-    const { error } = await supabase
+async function getEventsByBusiness(businessId: string): Promise<Event[]> {
+  try {
+    const { data, error } = await supabase
       .from('events')
-      .update({ is_active: false })
-      .eq('id', id);
+      .select('*')
+      .eq('business_id', businessId)
+      .order('date', { ascending: true });
 
     if (error) {
-      console.error('Error deleting event:', error);
-      return false;
+      console.error('Error getting events by business:', error);
+      return [];
     }
 
-    return true;
+    return data.map(event => ({
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      date: event.date,
+      time: event.time,
+      image: event.image,
+      businessId: event.business_id,
+      status: event.status,
+      totalCapacity: event.total_capacity,
+      seatMapData: event.seat_map_data,
+      createdAt: event.created_at,
+      updatedAt: event.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting events by business:', error);
+    return [];
   }
+}
 
-  async approveEvent(id: string): Promise<boolean> {
-    console.log('✅ Approving event and activating it:', id);
-    // Cuando se aprueba un evento, también debe activarse para que aparezca públicamente
-    return await this.updateEvent(id, {
-      status: 'approved',
-      isActive: true
-    });
-  }
+// =============================================================================
+// SECTORES DE EVENTOS
+// =============================================================================
 
-  async rejectEvent(id: string, reason: string): Promise<boolean> {
-    return await this.updateEvent(id, { status: 'rejected', rejectionReason: reason });
-  }
+async function addEventSector(sectorData: {
+  eventId: string;
+  name: string;
+  price: number;
+  capacity: number;
+  priceType: EventSector['priceType'];
+  color?: string;
+}): Promise<EventSector | null> {
+  try {
+    const { data, error } = await supabase
+      .from('event_sectors')
+      .insert({
+        event_id: sectorData.eventId,
+        name: sectorData.name,
+        price: sectorData.price,
+        capacity: sectorData.capacity,
+        price_type: sectorData.priceType,
+        color: sectorData.color
+      })
+      .select()
+      .single();
 
-  // ====================================================
-  // SITE CONFIGURATION
-  // ====================================================
-
-  async getSiteConfig(): Promise<SiteConfig> {
-    try {
-      const { data, error } = await supabase
-        .from('site_config')
-        .select('*')
-        .limit(1)
-        .single();
-
-      if (error) {
-        // Retornar configuración por defecto si no existe o hay error
-        return {
-          id: '1',
-          logoUrl: '/logo.png',
-          siteName: 'EventosDiscos',
-          tagline: '# ACOMPAÑANDO LOS MEJORES EVENTOS',
-          footerContent: {
-            companyDescription: 'La plataforma líder para eventos de discotecas y entretenimiento nocturno en Bolivia.',
-            contactInfo: {
-              address: 'Av. Las Américas #123, Santa Cruz',
-              email: 'soporte@eventosdisc.com',
-              phone: '78005026'
-            },
-            socialLinks: {
-              facebook: 'https://facebook.com/eventosdisc',
-              instagram: 'https://instagram.com/eventosdisc'
-            }
-          },
-          carouselImages: await this.getCarouselImages()
-        };
-      }
-
-      return {
-        id: data.id,
-        logoUrl: data.logo_url || '/logo.png',
-        siteName: data.site_name || 'EventosDiscos',
-        tagline: data.tagline || '# ACOMPAÑANDO LOS MEJORES EVENTOS',
-        footerContent: data.footer_content || {},
-        carouselImages: await this.getCarouselImages()
-      };
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getSiteConfig', {
-        id: '1',
-        logoUrl: '/logo.png',
-        siteName: 'EventosDiscos',
-        tagline: '# ACOMPAÑANDO LOS MEJORES EVENTOS',
-        footerContent: {},
-        carouselImages: []
-      });
+    if (error) {
+      console.error('Error adding event sector:', error);
+      return null;
     }
-  }
 
-  async updateSiteConfig(updates: Partial<SiteConfig>): Promise<boolean> {
+    return {
+      id: data.id,
+      eventId: data.event_id,
+      name: data.name,
+      price: data.price,
+      capacity: data.capacity,
+      priceType: data.price_type,
+      color: data.color,
+      availableSpots: data.available_spots,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception adding event sector:', error);
+    return null;
+  }
+}
+
+async function getEventSectors(eventId: string): Promise<EventSector[]> {
+  try {
+    const { data, error } = await supabase
+      .from('event_sectors')
+      .select('*')
+      .eq('event_id', eventId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error getting event sectors:', error);
+      return [];
+    }
+
+    return data.map(sector => ({
+      id: sector.id,
+      eventId: sector.event_id,
+      name: sector.name,
+      price: sector.price,
+      capacity: sector.capacity,
+      priceType: sector.price_type,
+      color: sector.color,
+      availableSpots: sector.available_spots,
+      createdAt: sector.created_at,
+      updatedAt: sector.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting event sectors:', error);
+    return [];
+  }
+}
+
+// =============================================================================
+// CONFIGURACIÓN DEL SITIO
+// =============================================================================
+
+async function getSiteConfig(): Promise<SiteConfig | null> {
+  try {
+    const { data, error } = await supabase
+      .from('site_config')
+      .select('*')
+      .limit(1)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return {
+      id: data.id,
+      siteName: data.site_name,
+      siteDescription: data.site_description,
+      logo: data.logo,
+      favicon: data.favicon,
+      primaryColor: data.primary_color,
+      secondaryColor: data.secondary_color,
+      contactEmail: data.contact_email,
+      contactPhone: data.contact_phone,
+      socialLinks: data.social_links,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception getting site config:', error);
+    return null;
+  }
+}
+
+async function updateSiteConfig(configData: Partial<SiteConfig>): Promise<boolean> {
+  try {
     const updateData: any = {};
 
-    if (updates.logoUrl) updateData.logo_url = updates.logoUrl;
-    if (updates.siteName) updateData.site_name = updates.siteName;
-    if (updates.tagline) updateData.tagline = updates.tagline;
-    if (updates.footerContent) updateData.footer_content = updates.footerContent;
+    if (configData.siteName !== undefined) updateData.site_name = configData.siteName;
+    if (configData.siteDescription !== undefined) updateData.site_description = configData.siteDescription;
+    if (configData.logo !== undefined) updateData.logo = configData.logo;
+    if (configData.favicon !== undefined) updateData.favicon = configData.favicon;
+    if (configData.primaryColor !== undefined) updateData.primary_color = configData.primaryColor;
+    if (configData.secondaryColor !== undefined) updateData.secondary_color = configData.secondaryColor;
+    if (configData.contactEmail !== undefined) updateData.contact_email = configData.contactEmail;
+    if (configData.contactPhone !== undefined) updateData.contact_phone = configData.contactPhone;
+    if (configData.socialLinks !== undefined) updateData.social_links = configData.socialLinks;
+
+    updateData.updated_at = new Date().toISOString();
 
     const { error } = await supabase
       .from('site_config')
@@ -756,82 +597,126 @@ class SupabaseDatabase {
     }
 
     return true;
+  } catch (error) {
+    console.error('Exception updating site config:', error);
+    return false;
   }
+}
 
-  // ====================================================
-  // CAROUSEL IMAGES
-  // ====================================================
+// =============================================================================
+// IMÁGENES DEL CARRUSEL
+// =============================================================================
 
-  async getCarouselImages(): Promise<CarouselImage[]> {
-    try {
-      const { data, error } = await supabase
-        .from('carousel_images')
-        .select('*')
-        .eq('is_active', true)
-        .order('order_position', { ascending: true });
+async function addCarouselImage(imageData: {
+  imageUrl: string;
+  title?: string;
+  subtitle?: string;
+  linkUrl?: string;
+  isActive?: boolean;
+}): Promise<CarouselImage | null> {
+  try {
+    // Obtener el siguiente order_position
+    const { data: maxOrder } = await supabase
+      .from('carousel_images')
+      .select('order_position')
+      .order('order_position', { ascending: false })
+      .limit(1);
 
-      if (error) {
-        return this.handleDatabaseError(error, 'getCarouselImages', []);
-      }
+    const nextOrderPosition = (maxOrder && maxOrder[0]?.order_position || 0) + 1;
 
-      return data.map(image => ({
-        id: image.id,
-        url: image.url,
-        title: image.title,
-        subtitle: image.subtitle,
-        link: image.link,
-        order: image.order_position,
-        isActive: image.is_active
-      }));
-    } catch (error) {
-      return this.handleDatabaseError(error, 'getCarouselImages', []);
-    }
-  }
-
-  async addCarouselImage(imageData: Omit<CarouselImage, 'id'>): Promise<boolean> {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('carousel_images')
       .insert({
-        url: imageData.url,
-        title: imageData.title,
-        subtitle: imageData.subtitle || null,
-        link: imageData.link || null,
-        order_position: imageData.order,
-        is_active: imageData.isActive
-      });
+        url: imageData.imageUrl,                    // ✅ Correcto
+        title: imageData.title || 'Nueva imagen',   // ✅ REQUIRED - valor por defecto
+        subtitle: imageData.subtitle || null,       // ✅ Opcional
+        link: imageData.linkUrl || null,            // ✅ Opcional
+        order_position: nextOrderPosition,          // ✅ REQUIRED - calculado
+        is_active: imageData.isActive ?? true       // ✅ Correcto
+      })
+      .select()
+      .single();
 
     if (error) {
       console.error('Error adding carousel image:', error);
-      return false;
+      return null;
     }
 
-    return true;
+    return {
+      id: data.id,
+      imageUrl: data.url,              // ✅ Correcto: url -> imageUrl
+      title: data.title,
+      subtitle: data.subtitle,
+      linkUrl: data.link,              // ✅ Correcto: link -> linkUrl
+      isActive: data.is_active,        // ✅ Correcto: is_active -> isActive
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception adding carousel image:', error);
+    return null;
   }
+}
 
-  async updateCarouselImage(id: string, updates: Partial<CarouselImage>): Promise<boolean> {
-    const updateData: any = {};
-
-    if (updates.url) updateData.url = updates.url;
-    if (updates.title) updateData.title = updates.title;
-    if (updates.subtitle !== undefined) updateData.subtitle = updates.subtitle;
-    if (updates.link !== undefined) updateData.link = updates.link;
-    if (updates.order !== undefined) updateData.order_position = updates.order;
-    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
-
-    const { error } = await supabase
+async function getCarouselImages(): Promise<CarouselImage[]> {
+  try {
+    const { data, error } = await supabase
       .from('carousel_images')
-      .update(updateData)
-      .eq('id', id);
+      .select('*')
+      .eq('is_active', true)
+      .order('created_at', { ascending: true });
 
     if (error) {
-      console.error('Error updating carousel image:', error);
-      return false;
+      console.error('Error getting carousel images:', error);
+      return [];
     }
 
-    return true;
+    return data.map(image => ({
+      id: image.id,
+      imageUrl: image.url,             // ✅ Correcto: url -> imageUrl
+      title: image.title,
+      subtitle: image.subtitle,
+      linkUrl: image.link,             // ✅ Correcto: link -> linkUrl
+      isActive: image.is_active,       // ✅ Correcto: is_active -> isActive
+      createdAt: image.created_at,
+      updatedAt: image.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting carousel images:', error);
+    return [];
   }
+}
 
-  async deleteCarouselImage(id: string): Promise<boolean> {
+async function getAllCarouselImages(): Promise<CarouselImage[]> {
+  try {
+    const { data, error } = await supabase
+      .from('carousel_images')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('Error getting all carousel images:', error);
+      return [];
+    }
+
+    return data.map(image => ({
+      id: image.id,
+      imageUrl: image.url,             // ✅ Correcto: url -> imageUrl
+      title: image.title,
+      subtitle: image.subtitle,
+      linkUrl: image.link,             // ✅ Correcto: link -> linkUrl
+      isActive: image.is_active,       // ✅ Correcto: is_active -> isActive
+      createdAt: image.created_at,
+      updatedAt: image.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting all carousel images:', error);
+    return [];
+  }
+}
+
+async function deleteCarouselImage(id: string): Promise<boolean> {
+  try {
     const { error } = await supabase
       .from('carousel_images')
       .delete()
@@ -842,260 +727,203 @@ class SupabaseDatabase {
       return false;
     }
 
-    // Reordenar las imágenes restantes
-    const images = await this.getCarouselImages();
-    for (let i = 0; i < images.length; i++) {
-      await this.updateCarouselImage(images[i].id, { order: i + 1 });
-    }
-
     return true;
-  }
-
-  // ====================================================
-  // MÉTODOS SIMPLIFICADOS PARA PURCHASES Y TICKETS
-  // ====================================================
-
-  // Métodos básicos que retornan datos vacíos para compatibilidad
-  async createPurchase(purchaseData: any): Promise<Purchase> {
-    console.warn('⚠️ Método createPurchase no implementado aún en Supabase');
-    return {} as Purchase;
-  }
-
-  async getAllPurchases(): Promise<Purchase[]> {
-    console.warn('⚠️ Método getAllPurchases no implementado aún en Supabase');
-    return [];
-  }
-
-  async getPurchasesByBusinessId(businessId: string): Promise<Purchase[]> {
-    console.warn('⚠️ Método getPurchasesByBusinessId no implementado aún en Supabase');
-    return [];
-  }
-
-  async createTicketsForPurchase(purchaseId: string, ticketsData: any[]): Promise<Ticket[]> {
-    console.warn('⚠️ Método createTicketsForPurchase no implementado aún en Supabase');
-    return [];
-  }
-
-  async getTicketsByPurchaseId(purchaseId: string): Promise<Ticket[]> {
-    console.warn('⚠️ Método getTicketsByPurchaseId no implementado aún en Supabase');
-    return [];
-  }
-
-  async getTicketByVerificationCode(code: string): Promise<Ticket | undefined> {
-    console.warn('⚠️ Método getTicketByVerificationCode no implementado aún en Supabase');
-    return undefined;
-  }
-
-  async getTicketByQRCode(qrCode: string): Promise<Ticket | undefined> {
-    console.warn('⚠️ Método getTicketByQRCode no implementado aún en Supabase');
-    return undefined;
-  }
-
-  async validateTicket(ticketId: string, validatedBy: string): Promise<boolean> {
-    console.warn('⚠️ Método validateTicket no implementado aún en Supabase');
+  } catch (error) {
+    console.error('Exception deleting carousel image:', error);
     return false;
   }
-
-  async useTicket(ticketId: string): Promise<boolean> {
-    console.warn('⚠️ Método useTicket no implementado aún en Supabase');
-    return false;
-  }
-
-  async getCroquisTemplates(): Promise<CroquisTemplate[]> {
-    console.warn('⚠️ Método getCroquisTemplates no implementado aún en Supabase');
-    return [];
-  }
-
-  async getCroquisTemplatesByBusinessId(businessId: string): Promise<CroquisTemplate[]> {
-    console.warn('⚠️ Método getCroquisTemplatesByBusinessId no implementado aún en Supabase');
-    return [];
-  }
-
-  // Mantener métodos stub para compatibilidad con datos vacíos
-  getPurchaseById(id: string): Purchase | undefined {
-    console.warn('⚠️ Método getPurchaseById no implementado aún en Supabase');
-    return undefined;
-  }
-
-  getPurchaseByVerificationCode(code: string): Purchase | undefined {
-    console.warn('⚠️ Método getPurchaseByVerificationCode no implementado aún en Supabase');
-    return undefined;
-  }
-
-  updatePurchaseStatus(id: string, status: any): boolean {
-    console.warn('⚠️ Método updatePurchaseStatus no implementado aún en Supabase');
-    return false;
-  }
-
-  updatePurchaseNotification(id: string, type: any): boolean {
-    console.warn('⚠️ Método updatePurchaseNotification no implementado aún en Supabase');
-    return false;
-  }
-
-  getCroquisTemplateById(id: string): CroquisTemplate | undefined {
-    console.warn('⚠️ Método getCroquisTemplateById no implementado aún en Supabase');
-    return undefined;
-  }
-
-  createCroquisTemplate(template: any): CroquisTemplate {
-    console.warn('⚠️ Método createCroquisTemplate no implementado aún en Supabase');
-    return {} as CroquisTemplate;
-  }
-
-  updateCroquisTemplate(id: string, updates: any): boolean {
-    console.warn('⚠️ Método updateCroquisTemplate no implementado aún en Supabase');
-    return false;
-  }
-
-  deleteCroquisTemplate(id: string): boolean {
-    console.warn('⚠️ Método deleteCroquisTemplate no implementado aún en Supabase');
-    return false;
-  }
-
-  duplicateCroquisTemplate(id: string, newName: string): CroquisTemplate | null {
-    console.warn('⚠️ Método duplicateCroquisTemplate no implementado aún en Supabase');
-    return null;
-  }
-
-  incrementTemplateUsage(id: string): void {
-    console.warn('⚠️ Método incrementTemplateUsage no implementado aún en Supabase');
-  }
-
-  setDefaultTemplate(businessId: string, templateId: string): boolean {
-    console.warn('⚠️ Método setDefaultTemplate no implementado aún en Supabase');
-    return false;
-  }
-
-  getDefaultTemplate(businessId: string): CroquisTemplate | undefined {
-    console.warn('⚠️ Método getDefaultTemplate no implementado aún en Supabase');
-    return undefined;
-  }
-
-  getVerificationCode(code: string): VerificationCode | undefined {
-    console.warn('⚠️ Método getVerificationCode no implementado aún en Supabase');
-    return undefined;
-  }
-
-  deactivateVerificationCode(code: string): boolean {
-    console.warn('⚠️ Método deactivateVerificationCode no implementado aún en Supabase');
-    return false;
-  }
-
-  getTicketPortalData(code: string): any {
-    console.warn('⚠️ Método getTicketPortalData no implementado aún en Supabase');
-    return null;
-  }
-
-  getEventTicketStats(eventId: string): any {
-    console.warn('⚠️ Método getEventTicketStats no implementado aún en Supabase');
-    return {
-      total: 0,
-      pending: 0,
-      validated: 0,
-      used: 0,
-      cancelled: 0
-    };
-  }
-
-  // ====================================================
-  // MAPPERS PRIVADOS
-  // ====================================================
-
-  private mapUserFromDB(data: any): User {
-    return {
-      id: data.id,
-      email: data.email,
-      password: data.password_hash, // Para compatibilidad con la API actual
-      name: data.name,
-      role: data.role,
-      businessId: data.business_id,
-      createdBy: data.created_by,
-      permissions: data.permissions || {}
-    };
-  }
-
-  private mapBusinessFromDB(data: any): Business {
-    return {
-      id: data.id,
-      name: data.name,
-      email: data.email,
-      phone: data.phone,
-      address: data.address,
-      logo: data.logo,
-      description: data.description,
-      ownerId: data.owner_id,
-      paymentQrUrl: data.payment_qr_url,
-      paymentInstructions: data.payment_instructions
-    };
-  }
-
-  private mapEventFromDB(data: any): Event {
-    return {
-      id: data.id,
-      title: data.title,
-      description: data.description,
-      date: data.date,
-      time: data.time,
-      location: data.location,
-      city: data.city,
-      image: data.image,
-      price: data.price,
-      businessId: data.business_id,
-      businessName: data.business_name,
-      maxCapacity: data.max_capacity,
-      currentSales: data.current_sales,
-      isActive: data.is_active,
-      status: data.status,
-      rejectionReason: data.rejection_reason,
-      createdAt: data.created_at,
-      updatedAt: data.updated_at,
-      sectors: data.event_sectors?.map((sector: any) => ({
-        id: sector.id,
-        name: sector.name,
-        color: sector.color,
-        capacity: sector.capacity,
-        priceType: sector.price_type,
-        basePrice: sector.base_price,
-        isActive: sector.is_active
-      })) || [],
-      combos: data.event_combos?.map((combo: any) => ({
-        id: combo.id,
-        name: combo.name,
-        description: combo.description,
-        price: combo.price,
-        stock: combo.stock,
-        type: combo.type,
-        sectorRestriction: combo.sector_restriction || [],
-        isActive: combo.is_active
-      })) || [],
-      reservationConditions: data.reservation_conditions?.map((condition: any) => ({
-        id: condition.id,
-        description: condition.description,
-        minTicketsPerTable: condition.min_tickets_per_table,
-        maxTicketsPerTable: condition.max_tickets_per_table,
-        advancePaymentRequired: condition.advance_payment_required,
-        cancellationPolicy: condition.cancellation_policy
-      })) || [],
-      seatMapElements: data.seat_map_elements?.map((element: any) => ({
-        id: element.id,
-        type: element.type,
-        x: element.x,
-        y: element.y,
-        width: element.width,
-        height: element.height,
-        rotation: element.rotation,
-        sectorId: element.sector_id,
-        capacity: element.capacity,
-        label: element.label,
-        isReservable: element.is_reservable,
-        color: element.color
-      })) || [],
-      businessContact: data.business_contact || {},
-      paymentInfo: data.payment_info || {}
-    };
-  }
-
-
 }
 
-export const db = new SupabaseDatabase();
+// =============================================================================
+// COMPRAS Y TICKETS
+// =============================================================================
+
+async function addPurchase(purchaseData: {
+  eventId: string;
+  sectorId: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  quantity: number;
+  totalAmount: number;
+  selectedSeats?: string[];
+  paymentMethod?: Purchase['paymentMethod'];
+}): Promise<Purchase | null> {
+  try {
+    const { data, error } = await supabase
+      .from('purchases')
+      .insert({
+        event_id: purchaseData.eventId,
+        sector_id: purchaseData.sectorId,
+        customer_name: purchaseData.customerName,
+        customer_email: purchaseData.customerEmail,
+        customer_phone: purchaseData.customerPhone,
+        quantity: purchaseData.quantity,
+        total_amount: purchaseData.totalAmount,
+        selected_seats: purchaseData.selectedSeats,
+        payment_method: purchaseData.paymentMethod || 'qr',
+        status: 'pending_payment'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding purchase:', error);
+      return null;
+    }
+
+    return {
+      id: data.id,
+      eventId: data.event_id,
+      sectorId: data.sector_id,
+      customerName: data.customer_name,
+      customerEmail: data.customer_email,
+      customerPhone: data.customer_phone,
+      quantity: data.quantity,
+      totalAmount: data.total_amount,
+      selectedSeats: data.selected_seats,
+      paymentMethod: data.payment_method,
+      status: data.status,
+      verificationCode: data.verification_code,
+      createdAt: data.created_at,
+      updatedAt: data.updated_at
+    };
+  } catch (error) {
+    console.error('Exception adding purchase:', error);
+    return null;
+  }
+}
+
+async function generateVerificationCode(purchaseId: string, type: VerificationCode['type']): Promise<string | null> {
+  try {
+    const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+    const { data, error } = await supabase
+      .from('verification_codes')
+      .insert({
+        code,
+        purchase_id: purchaseId,
+        type,
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24 horas
+        is_used: false
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error generating verification code:', error);
+      return null;
+    }
+
+    return data.code;
+  } catch (error) {
+    console.error('Exception generating verification code:', error);
+    return null;
+  }
+}
+
+// Funciones auxiliares faltantes
+async function getPendingEvents(): Promise<Event[]> {
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error getting pending events:', error);
+      return [];
+    }
+
+    return data.map(event => ({
+      id: event.id,
+      title: event.title,
+      description: event.description,
+      date: event.date,
+      time: event.time,
+      location: event.location,
+      city: event.city,
+      image: event.image,
+      price: event.price,
+      businessId: event.business_id,
+      businessName: event.business_name,
+      maxCapacity: event.max_capacity,
+      currentSales: event.current_sales,
+      isActive: event.is_active,
+      status: event.status,
+      rejectionReason: event.rejection_reason,
+      businessContact: event.business_contact,
+      paymentInfo: event.payment_info,
+      createdAt: event.created_at,
+      updatedAt: event.updated_at
+    }));
+  } catch (error) {
+    console.error('Exception getting pending events:', error);
+    return [];
+  }
+}
+
+async function approveEvent(eventId: string): Promise<boolean> {
+  return updateEventStatus(eventId, 'approved');
+}
+
+async function rejectEvent(eventId: string, reason?: string): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from('events')
+      .update({
+        status: 'rejected',
+        rejection_reason: reason,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', eventId);
+
+    return !error;
+  } catch (error) {
+    console.error('Exception rejecting event:', error);
+    return false;
+  }
+}
+
+// Exportar todas las funciones
+export const db = {
+  // Usuarios
+  addUser,
+  authenticateUser,
+  getUserById,
+  getAllUsers,
+
+  // Negocios
+  addBusiness,
+  getAllBusinesses,
+  getBusinessById,
+
+  // Eventos
+  addEvent,
+  getAllEvents,
+  getEventById,
+  updateEventStatus,
+  getEventsByBusiness,
+  getPendingEvents,
+  approveEvent,
+  rejectEvent,
+
+  // Sectores
+  addEventSector,
+  getEventSectors,
+
+  // Configuración del sitio
+  getSiteConfig,
+  updateSiteConfig,
+
+  // Carrusel
+  addCarouselImage,
+  getCarouselImages,
+  getAllCarouselImages,
+  deleteCarouselImage,
+
+  // Compras y tickets
+  addPurchase,
+  generateVerificationCode
+};

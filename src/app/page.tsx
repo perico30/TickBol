@@ -19,9 +19,15 @@ export default function HomePage() {
   const loadEvents = useCallback(async () => {
     try {
       // Cargar solo eventos aprobados y activos
-      const approvedEvents = await db.getEvents(); // Ya filtra por status='approved' y isActive=true
+      const approvedEvents = await db.getAllEvents(); // Cambiado para usar la función correcta
       const images = await db.getCarouselImages();
 
+      console.log('🎠 CAROUSEL DEBUG:');
+      console.log('- Imágenes obtenidas:', images.length);
+      console.log('- Primera imagen:', images[0]);
+      console.log('- Todas las imágenes:', images);
+
+      console.log('📅 EVENTS DEBUG:');
       console.log('Loading approved events:', approvedEvents.length);
       console.log('Events loaded:', approvedEvents.map((e: Event) => ({ id: e.id, title: e.title, status: e.status })));
 

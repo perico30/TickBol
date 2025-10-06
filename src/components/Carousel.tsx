@@ -14,6 +14,17 @@ interface CarouselProps {
 export default function Carousel({ images, autoRotate = true, interval = 2000 }: CarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
 
+  // Debug: Log cuando se reciben imágenes
+  useEffect(() => {
+    console.log('🎠 CAROUSEL COMPONENT DEBUG:');
+    console.log('- Imágenes recibidas:', images.length);
+    console.log('- Imágenes array:', images);
+    if (images.length > 0) {
+      console.log('- Primera imagen URL:', images[0].imageUrl);
+      console.log('- Primera imagen completa:', images[0]);
+    }
+  }, [images]);
+
   // Auto rotation
   useEffect(() => {
     if (!autoRotate || images.length <= 1) return;
@@ -61,8 +72,8 @@ export default function Carousel({ images, autoRotate = true, interval = 2000 }:
       {/* Main Image */}
       <div className="relative h-full">
         <Image
-          src={currentImage.url}
-          alt={currentImage.title}
+          src={currentImage.imageUrl}
+          alt={currentImage.title || 'Imagen del carrusel'}
           fill
           className="object-cover transition-opacity duration-500"
           priority={currentIndex === 0}
@@ -80,9 +91,9 @@ export default function Carousel({ images, autoRotate = true, interval = 2000 }:
                   {currentImage.subtitle}
                 </p>
               )}
-              {currentImage.link && (
+              {currentImage.linkUrl && (
                 <a
-                  href={currentImage.link}
+                  href={currentImage.linkUrl}
                   className="bg-white text-gray-800 px-8 py-3 rounded-lg font-semibold hover:bg-gray-100 transition-colors inline-block"
                 >
                   Ver Más

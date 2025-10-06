@@ -1,7 +1,7 @@
 export interface User {
   id: string;
   email: string;
-  password: string;
+  password?: string; // Password only needed for creation, not for display
   name: string;
   role: 'admin' | 'business' | 'customer' | 'porteria';
   businessId?: string;
@@ -11,6 +11,8 @@ export interface User {
     canViewStats?: boolean;
     allowedEvents?: string[]; // IDs de eventos que puede validar
   };
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Business {
@@ -28,12 +30,16 @@ export interface Business {
 
 export interface EventSector {
   id: string;
+  eventId?: string;
   name: string;
   color: string;
   capacity: number;
-  priceType: 'per_seat' | 'per_table';
-  basePrice: number;
-  isActive: boolean;
+  price: number;
+  priceType?: 'per_seat' | 'per_table';
+  basePrice?: number;
+  isActive?: boolean;
+  description?: string;
+  createdAt?: string;
 }
 
 export interface EventCombo {
@@ -79,7 +85,7 @@ export interface CroquisTemplate {
   businessId: string;
   elements: SeatMapElement[];
   backgroundImage?: string;
-  canvasSize: { width: number; height: number };
+  canvasSize?: { width: number; height: number };
   isDefault?: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -119,6 +125,7 @@ export interface Event {
     qrUrl?: string;
     instructions?: string;
   };
+  croquisId?: string;
 }
 
 export interface AuthContextType {
@@ -131,33 +138,28 @@ export interface AuthContextType {
 
 export interface SiteConfig {
   id: string;
-  logoUrl: string;
   siteName: string;
-  tagline: string;
-  footerContent: {
-    companyDescription: string;
-    contactInfo: {
-      address: string;
-      email: string;
-      phone: string;
-    };
-    socialLinks: {
-      facebook?: string;
-      instagram?: string;
-      twitter?: string;
-    };
-  };
-  carouselImages: CarouselImage[];
+  siteDescription?: string;
+  logo?: string;
+  favicon?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  socialLinks?: Record<string, string>;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CarouselImage {
   id: string;
-  url: string;
-  title: string;
+  imageUrl: string;
+  title?: string;
   subtitle?: string;
-  link?: string;
-  order: number;
+  linkUrl?: string;
   isActive: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface EventWizardData {
