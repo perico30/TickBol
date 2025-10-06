@@ -12,6 +12,8 @@ import { Event } from '@/types';
 import { db } from '@/lib/database';
 import { Settings, Users, Calendar, Image as ImageIcon, CheckCircle, XCircle, CreditCardIcon } from 'lucide-react';
 import Link from 'next/link';
+import { Image as ImageIcon } from 'lucide-react';
+import Link from 'next/link';
 
 export default function AdminPage() {
   const { user, loading } = useAuth();
@@ -158,15 +160,16 @@ export default function AdminPage() {
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Eventos</CardTitle>
-                <Calendar className="h-4 w-4 text-muted-foreground" />
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ImageIcon className="w-5 h-5" /> Carrusel
+                </CardTitle>
+                <CardDescription>Gestiona las imágenes del Home.</CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats.totalEvents}</div>
-                <p className="text-xs text-muted-foreground">
-                  Eventos registrados
-                </p>
+                <Link href="/admin/carousel">
+                  <Button variant="secondary">Abrir gestor de carrusel</Button>
+                </Link>
               </CardContent>
             </Card>
 
