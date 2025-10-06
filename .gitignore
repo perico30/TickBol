@@ -1,45 +1,63 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
+# === Dependencies & package managers ===
+node_modules/
+.pnp/
 .pnp.*
+# Yarn
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
+# PNPM
+pnpm-lock.yaml
+# Bun cache (lockfile should be committed, cache not)
+bun.lockb
 
-# testing
-/coverage
+# === Build / caches ===
+.next/
+out/
+dist/
+.eslintcache
+.turbo/
+.cache/
+coverage/
+*.tsbuildinfo
 
-# next.js
-/.next/
-/out/
-
-# production
-/build
-
-# misc
+# === OS junk ===
 .DS_Store
-*.pem
+Thumbs.db
 
-# debug
+# === Env & secrets (NEVER commit real keys) ===
+.env
+.env.local
+.env.development
+.env.development.local
+.env.production
+.env.production.local
+.env.test
+.env.test.local
+# allow examples
+!.env.example
+!.env.local.example
+
+# === Vercel ===
+.vercel
+
+# === Next.js generated ===
+next-env.d.ts
+
+# === Logs ===
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
+bun-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# === Public uploads (keep folder, ignore files) ===
+public/uploads/**
+!public/uploads/**/.gitkeep
 
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# uploaded files
-/public/uploads/**/*
-!/public/uploads/**/.gitkeep
+# === Supabase local artifacts (keep migrations, ignore temp) ===
+supabase/.temp/**
+supabase/.branches/**
+supabase/.cache/**
