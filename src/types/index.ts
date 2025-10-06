@@ -58,7 +58,7 @@ export interface ReservationCondition {
 
 export interface SeatMapElement {
   id: string;
-  type: 'table' | 'chair' | 'bar' | 'bathroom' | 'stage' | 'entrance';
+  type: 'table' | 'chair' | 'stage' | 'bar' | 'bathroom' | 'entrance' | 'decoration' | 'wall';
   x: number;
   y: number;
   width: number;
@@ -67,8 +67,9 @@ export interface SeatMapElement {
   sectorId?: string;
   capacity?: number;
   label?: string;
-  isReservable: boolean;
   color?: string;
+  isReservable: boolean;
+  isOccupied?: boolean;
 }
 
 export interface CroquisTemplate {
@@ -76,12 +77,13 @@ export interface CroquisTemplate {
   name: string;
   description?: string;
   businessId: string;
-  seatMapElements: SeatMapElement[];
-  sectors: EventSector[];
-  isDefault: boolean;
+  elements: SeatMapElement[];
+  backgroundImage?: string;
+  canvasSize: { width: number; height: number };
+  isDefault?: boolean;
   createdAt: string;
   updatedAt?: string;
-  usageCount: number; // Para estadísticas
+  usageCount?: number; // Para estadísticas
 }
 
 export interface Event {

@@ -86,15 +86,25 @@ export default function CompraPage() {
     tickets: []
   });
 
-  useEffect(() => {
-    if (params.id) {
-      const eventData = db.getEventById(params.id as string);
+  const id = params.id as string;
+
+  const loadEvent = async () => {
+    try {
+      const eventData = await db.getEventById(id);
       if (eventData && eventData.status === 'approved') {
         setEvent(eventData);
+      } else {
+        router.push('/');
       }
-      setLoading(false);
+    } catch (error) {
+      console.error('Error loading event:', error);
+      router.push('/');
     }
-  }, [params.id]);
+  };
+
+  useEffect(() => {
+    loadEvent();
+  }, [id, router]);
 
   const updatePurchaseData = (field: keyof PurchaseData, value: any) => {
     setPurchaseData(prev => ({
@@ -146,63 +156,40 @@ export default function CompraPage() {
     setProcessing(true);
 
     try {
-      // Crear la compra
-      const purchase = db.createPurchase({
-        eventId: event.id,
+      // Create purchase
+      const purchase = await db.createPurchase(purchaseData);
+
+      // Create tickets
+      const ticketsToCreate = Array.from({ length: purchaseData.quantity }, (_, index) => ({
+        sectorId: purchaseData.selectedSector!.id,
+        seatNumber: purchaseData.selectedSeat || `${index + 1}`,
         customerName: purchaseData.customerName,
-        customerPhone: purchaseData.customerPhone,
-        customerEmail: purchaseData.customerEmail,
-        tickets: [],
-        totalAmount: purchaseData.total,
-        paymentMethod: purchaseData.paymentMethod,
-        paymentProof: purchaseData.paymentProof,
-        status: 'payment_submitted'
-      });
-
-      // Crear los tickets
-      const ticketsData = Array.from({ length: purchaseData.quantity }, () => ({
-        eventId: event.id,
-        eventTitle: event.title,
-        eventDate: event.date,
-        eventTime: event.time,
-        eventLocation: event.location,
-        businessName: event.businessName,
-        businessLogo: event.image,
-        sectorName: purchaseData.selectedSector!.name,
-        sectorColor: purchaseData.selectedSector!.color,
-        quantity: 1,
-        unitPrice: purchaseData.selectedSector!.basePrice,
-        totalPrice: purchaseData.selectedSector!.basePrice,
-        ticketType: 'CLIENTE' as const
+        customerPhone: purchaseData.customerPhone
       }));
+      const tickets = await db.createTicketsForPurchase(purchase.id, ticketsToCreate);
 
-      const tickets = db.createTicketsForPurchase(purchase.id, ticketsData);
-
-      // Actualizar datos de compra
+      // Update form data
       updatePurchaseData('verificationCode', purchase.verificationCode);
-      updatePurchaseData('tickets', tickets);
 
-      // Enviar notificación automática por WhatsApp
-      const whatsappMessage = `¡Hola ${purchaseData.customerName}!
-
-Hemos recibido tu comprobante de pago para el evento "${event.title}".
+      // Generate WhatsApp message
+      const message = `
+🎫 *Compra realizada exitosamente*
 
 📋 Código de verificación: ${purchase.verificationCode}
-🎫 Cantidad de entradas: ${purchaseData.quantity}
-💰 Total: Bs. ${purchaseData.total}
 
-Estamos verificando tu pago. Te notificaremos en 24-48 horas cuando tus entradas estén listas.
-
+Para ver el estado de tu compra y entradas digitales, ingresa a:
 Para ver el estado de tu compra: ${window.location.origin}/entradas/${purchase.verificationCode}
 
-¡Gracias por tu preferencia! 🎉`;
+¡Gracias por tu compra! 🎉
+      `.trim();
 
-      const whatsappUrl = `https://wa.me/591${purchaseData.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(whatsappMessage)}`;
+      // Send WhatsApp message
+      const whatsappUrl = `https://wa.me/591${purchaseData.customerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(message)}`;
 
-      // Abrir WhatsApp
+      // Open WhatsApp
       window.open(whatsappUrl, '_blank');
 
-      // Ir al siguiente paso
+      // Go to next step
       nextStep();
 
     } catch (error) {

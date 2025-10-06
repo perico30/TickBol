@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Phone, MessageCircle, QrCode, CreditCard, Eye, Calendar, MapPin, Users, DollarSign } from 'lucide-react';
+import { Phone, MessageCircle, QrCode, CreditCard, Eye, Calendar, MapPin, Users, DollarSign, AlertCircle, CheckCircle } from 'lucide-react';
 import Image from 'next/image';
 import FileUpload from '@/components/ui/file-upload';
 
@@ -37,15 +37,88 @@ interface Step5Props {
   loading?: boolean;
 }
 
+interface ValidationErrors {
+  phone?: string;
+  whatsapp?: string;
+  paymentInfo?: string;
+  general?: string;
+}
+
 export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, loading }: Step5Props) {
   const [previewQr, setPreviewQr] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [errors, setErrors] = useState<ValidationErrors>({});
+  const [showErrors, setShowErrors] = useState(false);
+
+  const validateStep = (): boolean => {
+    const newErrors: ValidationErrors = {};
+
+    // Validar teléfono del negocio (obligatorio)
+    if (!data.businessContact.phone || data.businessContact.phone.trim().length === 0) {
+      newErrors.phone = 'El teléfono del negocio es obligatorio';
+    } else {
+      // Validar formato de teléfono boliviano (7-8 dígitos)
+      const phoneRegex = /^[67][0-9]{7}$/;
+      const cleanPhone = data.businessContact.phone.replace(/\D/g, '');
+      if (!phoneRegex.test(cleanPhone)) {
+        newErrors.phone = 'Formato inválido. Usa: 7XXXXXXX o 6XXXXXXX (8 dígitos)';
+      }
+    }
+
+    // Validar WhatsApp (opcional, pero si existe debe ser válido)
+    if (data.businessContact.whatsapp && data.businessContact.whatsapp.trim()) {
+      const phoneRegex = /^[67][0-9]{7}$/;
+      const cleanWhatsApp = data.businessContact.whatsapp.replace(/\D/g, '');
+      if (!phoneRegex.test(cleanWhatsApp)) {
+        newErrors.whatsapp = 'Formato inválido. Usa: 7XXXXXXX o 6XXXXXXX (8 dígitos)';
+      }
+    }
+
+    // Validar información de pagos (al menos uno debe estar presente)
+    const hasQr = data.paymentInfo.qrUrl && data.paymentInfo.qrUrl.trim();
+    const hasInstructions = data.paymentInfo.instructions && data.paymentInfo.instructions.trim().length >= 20;
+
+    if (!hasQr && !hasInstructions) {
+      newErrors.paymentInfo = 'Debes agregar un QR de pago O instrucciones detalladas de pago (mínimo 20 caracteres)';
+    } else {
+      // Si hay QR, validar que sea una URL válida o imagen base64
+      if (hasQr) {
+        try {
+          if (!data.paymentInfo.qrUrl!.startsWith('data:image/')) {
+            new URL(data.paymentInfo.qrUrl!);
+          }
+        } catch {
+          newErrors.paymentInfo = 'El QR debe ser una URL válida o imagen subida';
+        }
+      }
+
+      // Si solo hay instrucciones, verificar que sean suficientemente detalladas
+      if (!hasQr && hasInstructions && data.paymentInfo.instructions!.length < 50) {
+        newErrors.paymentInfo = 'Sin QR, las instrucciones deben ser más detalladas (mínimo 50 caracteres)';
+      }
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleFinish = () => {
+    setShowErrors(true);
+    if (validateStep()) {
+      onFinish();
+    }
+  };
 
   const updateContact = (field: string, value: string) => {
     onUpdate('businessContact', {
       ...data.businessContact,
       [field]: value
     });
+
+    // Limpiar error al cambiar
+    if (errors[field as keyof ValidationErrors]) {
+      setErrors(prev => ({ ...prev, [field]: undefined }));
+    }
   };
 
   const updatePayment = (field: string, value: string) => {
@@ -53,6 +126,19 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
       ...data.paymentInfo,
       [field]: value
     });
+
+    // Limpiar error al cambiar
+    if (errors.paymentInfo) {
+      setErrors(prev => ({ ...prev, paymentInfo: undefined }));
+    }
+  };
+
+  const getFieldError = (field: keyof ValidationErrors) => {
+    return showErrors && errors[field] ? errors[field] : '';
+  };
+
+  const isFieldInvalid = (field: keyof ValidationErrors) => {
+    return showErrors && !!errors[field];
   };
 
   const formatPhoneForWhatsApp = (phone: string) => {
@@ -81,7 +167,7 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
     ? `https://wa.me/${formatPhoneForWhatsApp(whatsappNumber)}?text=${generateWhatsAppMessage()}`
     : '';
 
-  const isValid = data.businessContact.phone && (data.paymentInfo.qrUrl || data.paymentInfo.instructions);
+  const isValid = !showErrors || Object.keys(errors).length === 0;
 
   // Calculate event price from sectors
   const eventPrice = data.sectors.length > 0 ? data.sectors[0].basePrice || 50 : 50;
@@ -94,6 +180,25 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
           Configura la información de contacto y métodos de pago para tu evento
         </p>
       </div>
+
+      {/* Mostrar errores generales */}
+      {showErrors && Object.keys(errors).length > 0 && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="text-red-500 flex-shrink-0 mt-0.5" size={20} />
+              <div>
+                <h3 className="font-medium text-red-800 mb-2">Por favor corrige los siguientes errores:</h3>
+                <ul className="text-sm text-red-700 space-y-1">
+                  {Object.entries(errors).map(([field, error]) => (
+                    <li key={field}>• {error}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Contact Information */}
@@ -115,8 +220,15 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
                 value={data.businessContact.phone}
                 onChange={(e) => updateContact('phone', e.target.value)}
                 placeholder="78005026"
-                className="mt-1"
+                className={`mt-1 ${isFieldInvalid('phone') ? 'border-red-500 bg-red-50' : ''}`}
+                maxLength={8}
               />
+              {getFieldError('phone') && (
+                <p className="text-red-500 text-sm mt-1 flex items-center gap-1">
+                  <AlertCircle size={14} />
+                  {getFieldError('phone')}
+                </p>
+              )}
               <p className="text-xs text-gray-500 mt-1">
                 Este número aparecerá como contacto principal
               </p>
@@ -129,15 +241,22 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
                 value={data.businessContact.whatsapp || ''}
                 onChange={(e) => updateContact('whatsapp', e.target.value)}
                 placeholder="Si es diferente al teléfono principal"
-                className="mt-1"
+                className={`mt-1 ${isFieldInvalid('whatsapp') ? 'border-red-500 bg-red-50' : ''}`}
+                maxLength={8}
               />
+              {getFieldError('whatsapp') && (
+                <p className="text-red-500 text-sm mt-1 flex items-center gap-1">
+                  <AlertCircle size={14} />
+                  {getFieldError('whatsapp')}
+                </p>
+              )}
               <p className="text-xs text-gray-500 mt-1">
                 Si está vacío, se usará el teléfono principal
               </p>
             </div>
 
             {/* WhatsApp Preview */}
-            {whatsappNumber && (
+            {whatsappNumber && !getFieldError('phone') && !getFieldError('whatsapp') && (
               <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
                 <h4 className="font-medium text-green-800 mb-2 flex items-center gap-2">
                   <MessageCircle size={16} />
@@ -206,6 +325,7 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
                   value={data.paymentInfo.qrUrl?.startsWith('data:') ? '' : data.paymentInfo.qrUrl || ''}
                   onChange={(e) => updatePayment('qrUrl', e.target.value)}
                   placeholder="https://ejemplo.com/qr-pago.jpg"
+                  className={isFieldInvalid('paymentInfo') ? 'border-red-500 bg-red-50' : ''}
                 />
                 {data.paymentInfo.qrUrl && (
                   <Button
@@ -224,7 +344,7 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
             </div>
 
             {/* QR Preview */}
-            {data.paymentInfo.qrUrl && previewQr && (
+            {data.paymentInfo.qrUrl && previewQr && !getFieldError('paymentInfo') && (
               <div className="p-4 border rounded-lg bg-gray-50">
                 <h4 className="font-medium mb-2">Vista Previa del QR:</h4>
                 <div className="max-w-48 mx-auto">
@@ -234,6 +354,9 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
                     width={200}
                     height={200}
                     className="w-full h-auto border rounded"
+                    onError={() => {
+                      setErrors(prev => ({ ...prev, paymentInfo: 'Error al cargar la imagen del QR' }));
+                    }}
                   />
                 </div>
               </div>
@@ -247,10 +370,17 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
                 onChange={(e) => updatePayment('instructions', e.target.value)}
                 placeholder="Ejemplo:&#10;1. Escanea el QR con tu banco&#10;2. Realiza el pago del monto exacto&#10;3. Envía el comprobante por WhatsApp&#10;4. Espera la confirmación"
                 rows={5}
-                className="mt-1"
+                className={`mt-1 ${isFieldInvalid('paymentInfo') ? 'border-red-500 bg-red-50' : ''}`}
+                maxLength={500}
               />
+              {getFieldError('paymentInfo') && (
+                <p className="text-red-500 text-sm mt-1 flex items-center gap-1">
+                  <AlertCircle size={14} />
+                  {getFieldError('paymentInfo')}
+                </p>
+              )}
               <p className="text-xs text-gray-500 mt-1">
-                Explica paso a paso cómo realizar el pago
+                {data.paymentInfo.instructions?.length || 0}/500 caracteres - Explica paso a paso cómo realizar el pago
               </p>
             </div>
 
@@ -346,7 +476,7 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
             <DialogTrigger asChild>
               <Button
                 variant="outline"
-                disabled={!data.title || !data.date || !isValid}
+                disabled={!data.title || !data.date || (!isValid && showErrors)}
                 className="bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"
               >
                 <Eye size={16} className="mr-2" />
@@ -464,14 +594,23 @@ export default function Step5ContactPayment({ data, onUpdate, onFinish, onBack, 
           </Dialog>
 
           <Button
-            onClick={onFinish}
-            disabled={!isValid || loading}
+            onClick={handleFinish}
+            disabled={loading || (showErrors && !isValid)}
             size="lg"
-            className="bg-green-600 hover:bg-green-700"
+            className={`bg-green-600 hover:bg-green-700 ${loading || (showErrors && !isValid) ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {loading ? 'Creando Evento...' : '🎉 Crear Evento'}
           </Button>
         </div>
+      </div>
+
+      {/* Ayuda final */}
+      <div className="text-xs text-gray-500 space-y-1 bg-gray-50 rounded-lg p-4">
+        <p>💡 <strong>Información importante:</strong></p>
+        <p>• Tu evento será creado con estado "pendiente" hasta que sea aprobado</p>
+        <p>• Podrás editarlo desde tu panel de administración</p>
+        <p>• Los clientes podrán hacer reservas una vez que esté aprobado</p>
+        <p>• Recibirás notificaciones de nuevas reservas en tu teléfono</p>
       </div>
     </div>
   );

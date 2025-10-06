@@ -24,15 +24,21 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
+    console.log('📝 Login form submitted for:', email);
+
     try {
       const success = await login(email, password);
+
       if (success) {
+        console.log('✅ Login successful, redirecting...');
         router.push('/');
       } else {
-        setError('Email o contraseña incorrectos');
+        console.log('❌ Login failed - invalid credentials');
+        setError('Email o contraseña incorrectos. Verifica tus datos e intenta nuevamente.');
       }
     } catch (err) {
-      setError('Error al iniciar sesión');
+      console.error('❌ Login exception:', err);
+      setError('Error al iniciar sesión. Por favor intenta nuevamente.');
     } finally {
       setLoading(false);
     }
@@ -106,7 +112,7 @@ export default function LoginPage() {
                 <h3 className="font-medium text-sm mb-2">Cuentas de demostración:</h3>
                 <div className="text-xs space-y-1">
                   <div>
-                    <strong>Super Admin:</strong> admin@sistema.com / admin123
+                    <strong>Super Admin:</strong> admin@eventosdisc.com / admin123
                   </div>
                   <div>
                     <strong>Discoteca:</strong> discoteca@example.com / disco123

@@ -19,24 +19,24 @@ export default function DashboardPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [showSuccessMessage, setShowSuccessMessage] = useState('');
 
+  const loadBusinessEvents = async () => {
+    try {
+      if (user?.businessId) {
+        const businessEvents = await db.getEventsByBusinessId(user.businessId);
+        setEvents(businessEvents);
+      }
+    } catch (error) {
+      console.error('Error loading business events:', error);
+    }
+  };
+
   useEffect(() => {
-    if (loading) return; // Wait for auth to load
-
-    if (!user) {
-      router.push('/login');
+    if (!user) return;
+    if (user.role === 'admin') {
+      router.push('/admin');
       return;
     }
-
-    if (user.role !== 'business') {
-      router.push('/');
-      return;
-    }
-
-    // Load business events
-    if (user.businessId) {
-      const businessEvents = db.getEventsByBusinessId(user.businessId);
-      setEvents(businessEvents);
-    }
+    loadBusinessEvents();
   }, [user, router]);
 
   const handleDeleteEvent = (eventId: string) => {
@@ -85,12 +85,7 @@ export default function DashboardPage() {
               <Button asChild>
                 <Link href="/dashboard/wizard-evento">
                   <Plus size={16} className="mr-2" />
-                  Wizard de Eventos
-                </Link>
-              </Button>
-              <Button asChild variant="outline">
-                <Link href="/dashboard/nuevo-evento">
-                  Evento Rápido
+                  Crear Evento
                 </Link>
               </Button>
               <Button asChild variant="outline" className="bg-purple-50 hover:bg-purple-100 border-purple-200">
@@ -181,7 +176,7 @@ export default function DashboardPage() {
                     Comienza creando tu primer evento
                   </p>
                   <Button asChild>
-                    <Link href="/dashboard/nuevo-evento">
+                    <Link href="/dashboard/wizard-evento">
                       <Plus size={16} className="mr-2" />
                       Crear Primer Evento
                     </Link>

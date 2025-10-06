@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { Button } from '@/components/ui/button';
@@ -15,18 +15,35 @@ import Image from 'next/image';
 
 export default function EventDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const [event, setEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (params.id) {
-      const eventData = db.getEventById(params.id as string);
+  const id = params.id as string;
+
+  const loadEvent = async () => {
+    try {
+      console.log('🔍 Loading event with ID:', id);
+      const eventData = await db.getEventById(id);
+
       if (eventData && eventData.status === 'approved') {
+        console.log('✅ Event loaded successfully:', eventData.title);
         setEvent(eventData);
+      } else {
+        console.log('❌ Event not found or not approved, redirecting...');
+        router.push('/');
       }
+    } catch (error) {
+      console.error('❌ Error loading event:', error);
+      router.push('/');
+    } finally {
       setLoading(false);
     }
-  }, [params.id]);
+  };
+
+  useEffect(() => {
+    loadEvent();
+  }, [id, router]);
 
   const generateWhatsAppMessage = () => {
     if (!event) return '';

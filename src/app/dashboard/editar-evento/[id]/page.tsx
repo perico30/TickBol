@@ -34,48 +34,46 @@ export default function EditEventPage() {
     price: '',
     maxCapacity: ''
   });
+  const [id] = useState(params.id as string);
+
+  const loadData = async () => {
+    try {
+      if (user?.businessId) {
+        const businessData = await db.getBusinessById(user.businessId);
+        setBusiness(businessData || null);
+
+        const event = await db.getEventById(id);
+        if (event && event.businessId === user.businessId) {
+          setEventData(event);
+          setFormData({
+            title: event.title,
+            description: event.description,
+            date: event.date,
+            time: event.time,
+            location: event.location,
+            city: event.city,
+            image: event.image,
+            price: event.price.toString(),
+            maxCapacity: event.maxCapacity?.toString() || ''
+          });
+        } else {
+          router.push('/dashboard');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading data:', error);
+      router.push('/dashboard');
+    }
+  };
 
   useEffect(() => {
-    if (authLoading) return;
-
-    if (!user) {
-      router.push('/login');
+    if (!user) return;
+    if (user.role === 'admin') {
+      router.push('/admin');
       return;
     }
-
-    if (user.role !== 'business') {
-      router.push('/');
-      return;
-    }
-
-    // Load business data
-    if (user.businessId) {
-      const businessData = db.getBusinessById(user.businessId);
-      setBusiness(businessData || null);
-    }
-
-    // Load event data
-    if (params.id) {
-      const event = db.getEventById(params.id as string);
-      if (event && event.businessId === user.businessId) {
-        setEventData(event);
-        setFormData({
-          title: event.title,
-          description: event.description,
-          date: event.date,
-          time: event.time,
-          location: event.location,
-          city: event.city,
-          image: event.image,
-          price: event.price.toString(),
-          maxCapacity: event.maxCapacity?.toString() || ''
-        });
-      } else {
-        // Event not found or doesn't belong to this business
-        router.push('/dashboard');
-      }
-    }
-  }, [user, authLoading, router, params.id]);
+    loadData();
+  }, [user, router, id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

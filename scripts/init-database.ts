@@ -165,7 +165,9 @@ async function initDatabase() {
   } catch (error) {
     console.error('❌ Error:', error);
 
-    if (error.message?.includes('Could not find the table')) {
+    if (error && typeof error === 'object' && 'message' in error &&
+        typeof (error as any).message === 'string' &&
+        (error as any).message.includes('Could not find the table')) {
       console.log('\n💡 SOLUCIÓN:');
       console.log('Las tablas no existen. Ejecuta el esquema SQL manualmente:');
       console.log('1. Ve a https://supabase.com/dashboard');

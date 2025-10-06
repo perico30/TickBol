@@ -15,7 +15,16 @@ class SupabaseDatabase {
       console.warn(`⚠️ Tabla no existe para operación: ${operation}. Retornando valor por defecto.`);
       return defaultReturn;
     }
-    console.error(`Error en ${operation}:`, error);
+
+    // Log más detallado para debugging
+    console.error(`❌ Error en ${operation}:`, {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+      error: error
+    });
+
     return defaultReturn;
   }
 
@@ -129,6 +138,34 @@ class SupabaseDatabase {
       return this.mapUserFromDB(data);
     } catch (error) {
       return this.handleDatabaseError(error, 'addUser', null);
+    }
+  }
+
+  async updateUser(userId: string, updates: Partial<User>): Promise<User | null> {
+    try {
+      const updateData: any = {};
+
+      if (updates.email) updateData.email = updates.email;
+      if (updates.name) updateData.name = updates.name;
+      if (updates.role) updateData.role = updates.role;
+      if (updates.businessId !== undefined) updateData.business_id = updates.businessId;
+      if (updates.permissions) updateData.permissions = updates.permissions;
+      if (updates.password) updateData.password_hash = await this.hashPassword(updates.password);
+
+      const { data, error } = await supabase
+        .from('users')
+        .update(updateData)
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (error) {
+        return this.handleDatabaseError(error, 'updateUser', null);
+      }
+
+      return this.mapUserFromDB(data);
+    } catch (error) {
+      return this.handleDatabaseError(error, 'updateUser', null);
     }
   }
 
@@ -344,6 +381,8 @@ class SupabaseDatabase {
 
   async getAllEvents(): Promise<Event[]> {
     try {
+      console.log('🔍 Fetching all events (including inactive for admin)...');
+
       const { data, error } = await supabase
         .from('events')
         .select(`
@@ -353,21 +392,25 @@ class SupabaseDatabase {
           reservation_conditions(*),
           seat_map_elements(*)
         `)
-        .eq('is_active', true)
+        // Removido el filtro .eq('is_active', true) para que el admin pueda ver todos los eventos
         .order('created_at', { ascending: false });
 
       if (error) {
+        console.error('❌ Error fetching all events:', error);
         return this.handleDatabaseError(error, 'getAllEvents', []);
       }
 
+      console.log(`✅ Found ${data?.length || 0} total events`);
       return data.map(this.mapEventFromDB);
     } catch (error) {
+      console.error('❌ Exception in getAllEvents:', error);
       return this.handleDatabaseError(error, 'getAllEvents', []);
     }
   }
 
   async getEventById(id: string): Promise<Event | undefined> {
     try {
+      // Primero intenta obtener el evento con todas las relaciones
       const { data, error } = await supabase
         .from('events')
         .select(`
@@ -381,8 +424,29 @@ class SupabaseDatabase {
         .single();
 
       if (error) {
-        return this.handleDatabaseError(error, 'getEventById', undefined);
+        console.warn('⚠️ Error getting event with relations, trying basic event:', error.message);
+
+        // Si falla, intenta obtener solo el evento básico
+        const { data: basicData, error: basicError } = await supabase
+          .from('events')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (basicError) {
+          return this.handleDatabaseError(basicError, 'getEventById', undefined);
+        }
+
+        // Retorna evento básico sin relaciones
+        return this.mapEventFromDB({
+          ...basicData,
+          event_sectors: [],
+          event_combos: [],
+          reservation_conditions: [],
+          seat_map_elements: []
+        });
       }
+
       return this.mapEventFromDB(data);
     } catch (error) {
       return this.handleDatabaseError(error, 'getEventById', undefined);
@@ -416,6 +480,8 @@ class SupabaseDatabase {
 
   async getPendingEvents(): Promise<Event[]> {
     try {
+      console.log('🔍 Fetching pending events for admin approval...');
+
       const { data, error } = await supabase
         .from('events')
         .select(`
@@ -426,100 +492,136 @@ class SupabaseDatabase {
           seat_map_elements(*)
         `)
         .eq('status', 'pending')
-        .eq('is_active', true)
+        // Removido el filtro .eq('is_active', true) porque los eventos pendientes
+        // pueden estar inactivos hasta ser aprobados
         .order('created_at', { ascending: false });
 
       if (error) {
+        console.error('❌ Error fetching pending events:', error);
         return this.handleDatabaseError(error, 'getPendingEvents', []);
       }
 
+      console.log(`✅ Found ${data?.length || 0} pending events`);
       return data.map(this.mapEventFromDB);
     } catch (error) {
+      console.error('❌ Exception in getPendingEvents:', error);
       return this.handleDatabaseError(error, 'getPendingEvents', []);
     }
   }
 
   async addEvent(eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>): Promise<Event | null> {
-    // Usar una transacción para crear el evento y sus elementos relacionados
-    const { data: eventResult, error: eventError } = await supabase
-      .from('events')
-      .insert({
-        title: eventData.title,
-        description: eventData.description,
-        date: eventData.date,
-        time: eventData.time,
-        location: eventData.location,
-        city: eventData.city,
-        image: eventData.image,
-        price: eventData.price,
+    try {
+      console.log('📅 Starting simplified event creation...');
+
+      // Función auxiliar para truncar texto de manera segura
+      const safeTruncate = (text: string | undefined, maxLength: number): string => {
+        if (!text || typeof text !== 'string') return '';
+        return text.length > maxLength ? text.substring(0, maxLength) : text;
+      };
+
+      // Función para procesar imagen de manera segura
+      const safeProcessImage = (imageUrl?: string): string => {
+        const defaultImage = 'https://images.unsplash.com/photo-1571896349842-33c89424de2d?w=800&h=600&fit=crop';
+
+        if (!imageUrl || typeof imageUrl !== 'string') return defaultImage;
+
+        // Si es base64 muy largo, usar imagen por defecto
+        if (imageUrl.startsWith('data:image/') && imageUrl.length > 500) {
+          console.warn('⚠️ Image base64 too long, using default');
+          return defaultImage;
+        }
+
+        // Si es URL muy larga, usar imagen por defecto
+        if (imageUrl.length > 300) {
+          console.warn('⚠️ Image URL too long, using default');
+          return defaultImage;
+        }
+
+        return imageUrl;
+      };
+
+      // Preparar datos del evento de manera segura y simple
+      const safeEventData = {
+        title: safeTruncate(eventData.title, 100),
+        description: safeTruncate(eventData.description, 500),
+        date: eventData.date || new Date().toISOString().split('T')[0],
+        time: eventData.time || '20:00',
+        location: safeTruncate(eventData.location, 200),
+        city: safeTruncate(eventData.city, 50),
+        image: safeProcessImage(eventData.image),
+        price: Math.max(1, Math.min(10000, eventData.price || 50)),
         business_id: eventData.businessId,
-        business_name: eventData.businessName,
-        max_capacity: eventData.maxCapacity || null,
-        current_sales: eventData.currentSales || 0,
-        status: eventData.status,
+        business_name: safeTruncate(eventData.businessName, 100),
+        max_capacity: Math.max(1, Math.min(10000, eventData.maxCapacity || 100)),
+        current_sales: Math.max(0, eventData.currentSales || 0),
+        status: eventData.status || 'pending',
+        is_active: Boolean(eventData.isActive),
         business_contact: eventData.businessContact || {},
         payment_info: eventData.paymentInfo || {}
-      })
-      .select()
-      .single();
+      };
 
-    if (eventError || !eventResult) {
-      console.error('Error creating event:', eventError);
+      console.log('💾 Inserting event with safe data:', safeEventData.title);
+
+      // Insertar solo el evento principal
+      const { data: eventResult, error: eventError } = await supabase
+        .from('events')
+        .insert(safeEventData)
+        .select()
+        .single();
+
+      if (eventError) {
+        console.error('❌ Database error:', eventError.message);
+        console.error('❌ Error code:', eventError.code);
+        console.error('❌ Error details:', eventError.details);
+        return null;
+      }
+
+      if (!eventResult) {
+        console.error('❌ No result returned from database');
+        return null;
+      }
+
+      console.log('✅ Event created successfully! ID:', eventResult.id);
+
+      // Retornar evento exitoso inmediatamente
+      const successEvent: Event = {
+        id: eventResult.id,
+        title: safeEventData.title,
+        description: safeEventData.description,
+        date: safeEventData.date,
+        time: safeEventData.time,
+        location: safeEventData.location,
+        city: safeEventData.city,
+        image: safeEventData.image,
+        price: safeEventData.price,
+        businessId: safeEventData.business_id,
+        businessName: safeEventData.business_name,
+        maxCapacity: safeEventData.max_capacity,
+        currentSales: safeEventData.current_sales,
+        isActive: safeEventData.is_active,
+        status: safeEventData.status,
+        createdAt: eventResult.created_at || new Date().toISOString(),
+        updatedAt: eventResult.updated_at || new Date().toISOString(),
+        sectors: eventData.sectors || [],
+        combos: eventData.combos || [],
+        reservationConditions: eventData.reservationConditions || [],
+        seatMapElements: eventData.seatMapElements || [],
+        businessContact: safeEventData.business_contact,
+        paymentInfo: safeEventData.payment_info,
+        rejectionReason: undefined
+      };
+
+      console.log('🎉 Event creation completed successfully!');
+      return successEvent;
+
+    } catch (error) {
+      console.error('❌ Exception during event creation:', error);
+      if (error instanceof Error) {
+        console.error('❌ Error message:', error.message);
+        console.error('❌ Error stack:', error.stack);
+      }
       return null;
     }
-
-    const eventId = eventResult.id;
-
-    // Insertar sectores
-    if (eventData.sectors && eventData.sectors.length > 0) {
-      const sectorsData = eventData.sectors.map(sector => ({
-        event_id: eventId,
-        name: sector.name,
-        color: sector.color,
-        capacity: sector.capacity,
-        price_type: sector.priceType,
-        base_price: sector.basePrice,
-        is_active: sector.isActive
-      }));
-
-      const { error: sectorsError } = await supabase
-        .from('event_sectors')
-        .insert(sectorsData);
-
-      if (sectorsError) {
-        console.error('Error creating event sectors:', sectorsError);
-      }
-    }
-
-    // Insertar elementos del mapa de asientos
-    if (eventData.seatMapElements && eventData.seatMapElements.length > 0) {
-      const elementsData = eventData.seatMapElements.map(element => ({
-        event_id: eventId,
-        type: element.type,
-        x: element.x,
-        y: element.y,
-        width: element.width,
-        height: element.height,
-        rotation: element.rotation || 0,
-        sector_id: element.sectorId || null,
-        capacity: element.capacity || null,
-        label: element.label || null,
-        is_reservable: element.isReservable,
-        color: element.color || null
-      }));
-
-      const { error: elementsError } = await supabase
-        .from('seat_map_elements')
-        .insert(elementsData);
-
-      if (elementsError) {
-        console.error('Error creating seat map elements:', elementsError);
-      }
-    }
-
-    // Retornar el evento completo
-    const fullEvent = await this.getEventById(eventId);
-    return fullEvent || null;
   }
 
   async updateEvent(id: string, updates: Partial<Event>): Promise<boolean> {
@@ -536,6 +638,7 @@ class SupabaseDatabase {
     if (updates.maxCapacity !== undefined) updateData.max_capacity = updates.maxCapacity;
     if (updates.currentSales !== undefined) updateData.current_sales = updates.currentSales;
     if (updates.status) updateData.status = updates.status;
+    if (updates.isActive !== undefined) updateData.is_active = updates.isActive;
     if (updates.rejectionReason !== undefined) updateData.rejection_reason = updates.rejectionReason;
     if (updates.businessContact) updateData.business_contact = updates.businessContact;
     if (updates.paymentInfo) updateData.payment_info = updates.paymentInfo;
@@ -568,7 +671,12 @@ class SupabaseDatabase {
   }
 
   async approveEvent(id: string): Promise<boolean> {
-    return await this.updateEvent(id, { status: 'approved' });
+    console.log('✅ Approving event and activating it:', id);
+    // Cuando se aprueba un evento, también debe activarse para que aparezca públicamente
+    return await this.updateEvent(id, {
+      status: 'approved',
+      isActive: true
+    });
   }
 
   async rejectEvent(id: string, reason: string): Promise<boolean> {

@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Business, User } from '@/types';
+import { Business, User, Event } from '@/types';
 import { db } from '@/lib/database';
 import { ArrowLeft, Search, Users, Building, Mail, Phone, Plus, Copy, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
@@ -22,6 +22,7 @@ export default function AdminBusinessesPage() {
   const router = useRouter();
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [businessUsers, setBusinessUsers] = useState<User[]>([]);
+  const [businessEvents, setBusinessEvents] = useState<{[key: string]: Event[]}>({});
   const [filteredBusinesses, setFilteredBusinesses] = useState<Business[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -50,23 +51,30 @@ export default function AdminBusinessesPage() {
     }
 
     loadData();
-  }, [user, router]);
+  }, [user, router, loading]);
 
   useEffect(() => {
     filterBusinesses();
   }, [businesses, searchTerm]);
 
-  const loadData = () => {
+  const loadData = async () => {
     try {
       console.log('Loading businesses data...');
-      const allBusinesses = db.getBusinesses();
-      const allUsers = db.getUsers().filter(u => u.role === 'business');
+      const allBusinesses = await db.getBusinesses();
+      const allUsers = (await db.getUsers()).filter((u: User) => u.role === 'business');
 
       console.log('Loaded businesses:', allBusinesses.length);
       console.log('Loaded business users:', allUsers.length);
 
+      // Load events for each business
+      const eventsMap: {[key: string]: Event[]} = {};
+      for (const business of allBusinesses) {
+        eventsMap[business.id] = await db.getEventsByBusinessId(business.id);
+      }
+
       setBusinesses(allBusinesses);
       setBusinessUsers(allUsers);
+      setBusinessEvents(eventsMap);
     } catch (error) {
       console.error('Error loading businesses data:', error);
     }
@@ -95,43 +103,61 @@ export default function AdminBusinessesPage() {
     return password;
   };
 
-  const handleCreateBusiness = () => {
+  const generateUUID = () => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0;
+      const v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  };
+
+  const handleCreateBusiness = async () => {
     if (!newBusiness.name || !newBusiness.email || !newBusiness.phone) {
       alert('Por favor completa todos los campos requeridos');
       return;
     }
 
     try {
-      const businessId = Date.now().toString();
-      const userId = (Date.now() + 1).toString();
+      const businessId = generateUUID();
+      const userId = generateUUID();
       const generatedPassword = generatePassword();
 
       console.log('Creating business:', { businessId, userId, email: newBusiness.email });
 
-      // Create business
-      const business: Business = {
-        id: businessId,
+      // Create business (sin ID - Supabase lo generará automáticamente)
+      let businessData = {
         name: newBusiness.name,
         email: newBusiness.email,
         phone: newBusiness.phone,
         address: newBusiness.address,
         description: newBusiness.description,
-        ownerId: userId
+        ownerId: ''  // Se asignará después
       };
 
-      // Create user
-      const businessUser: User = {
-        id: userId,
+      // Create user (sin ID - Supabase lo generará automáticamente)
+      const userData = {
         email: newBusiness.email,
         password: generatedPassword,
         name: newBusiness.name,
-        role: 'business',
-        businessId: businessId
+        role: 'business' as const,
+        businessId: undefined  // Se asignará después
       };
 
-      // Save to database
-      db.addBusiness(business);
-      db.addUser(businessUser);
+      // Save to database: Crear usuario primero
+      const createdUser = await db.addUser(userData);
+      if (!createdUser) {
+        throw new Error('No se pudo crear el usuario');
+      }
+
+      // Luego crear negocio con el ID del usuario
+      businessData.ownerId = createdUser.id;
+      const createdBusiness = await db.addBusiness(businessData);
+      if (!createdBusiness) {
+        throw new Error('No se pudo crear el negocio');
+      }
+
+      // Finalmente actualizar el usuario con el ID del negocio
+      await db.updateUser(createdUser.id, { businessId: createdBusiness.id });
 
       console.log('Business and user created successfully');
 
@@ -153,7 +179,7 @@ export default function AdminBusinessesPage() {
       setShowAddDialog(false);
 
       // Reload data
-      loadData();
+      await loadData();
 
       alert('Negocio creado exitosamente');
     } catch (error) {
@@ -175,10 +201,6 @@ export default function AdminBusinessesPage() {
 
   const getBusinessOwner = (ownerId: string) => {
     return businessUsers.find(user => user.id === ownerId);
-  };
-
-  const getBusinessEvents = (businessId: string) => {
-    return db.getEventsByBusinessId(businessId);
   };
 
   if (loading) {
@@ -362,7 +384,7 @@ export default function AdminBusinessesPage() {
                     <p className="text-sm font-medium text-gray-600">Eventos Totales</p>
                     <p className="text-2xl font-bold text-gray-900">
                       {businesses.reduce((total, business) =>
-                        total + getBusinessEvents(business.id).length, 0
+                        total + (businessEvents[business.id]?.length || 0), 0
                       )}
                     </p>
                   </div>
@@ -412,9 +434,9 @@ export default function AdminBusinessesPage() {
                 <div className="grid gap-4">
                   {filteredBusinesses.map((business) => {
                     const owner = getBusinessOwner(business.ownerId);
-                    const events = getBusinessEvents(business.id);
-                    const approvedEvents = events.filter(e => e.status === 'approved');
-                    const pendingEvents = events.filter(e => e.status === 'pending');
+                    const events = businessEvents[business.id] || [];
+                    const approvedEvents = events.filter((e: Event) => e.status === 'approved');
+                    const pendingEvents = events.filter((e: Event) => e.status === 'pending');
 
                     return (
                       <div key={business.id} className="border rounded-lg p-6 hover:bg-gray-50">
@@ -473,7 +495,7 @@ export default function AdminBusinessesPage() {
                               <div className="flex items-center gap-2">
                                 <span>🎫</span>
                                 <span>
-                                  {events.reduce((total, event) => total + (event.currentSales || 0), 0)} entradas vendidas
+                                  {events.reduce((total: number, event: Event) => total + (event.currentSales || 0), 0)} entradas vendidas
                                 </span>
                               </div>
                             </div>
@@ -485,7 +507,7 @@ export default function AdminBusinessesPage() {
                           <div className="mt-4 pt-4 border-t">
                             <h4 className="font-medium text-gray-900 mb-2">Eventos Recientes</h4>
                             <div className="flex flex-wrap gap-2">
-                              {events.slice(0, 3).map((event) => (
+                              {events.slice(0, 3).map((event: Event) => (
                                 <Badge
                                   key={event.id}
                                   variant={event.status === 'approved' ? 'default' : 'secondary'}

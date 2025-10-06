@@ -13,155 +13,65 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Verificar sesión inicial
+    // Inicialización simplificada - solo verificar localStorage
     const initializeAuth = async () => {
       try {
-        // Obtener sesión actual de Supabase
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (session?.user) {
-          // Si hay sesión de Supabase, cargar datos del usuario desde nuestra base de datos
-          await loadUserFromDatabase(session.user);
-        } else {
-          // Fallback: verificar localStorage para compatibilidad
-          await checkStoredUser();
-        }
+        console.log('🔄 Initializing auth...');
+        await checkStoredUser();
       } catch (error) {
-        console.error('Error initializing auth:', error);
-        await checkStoredUser(); // Fallback a método anterior
+        console.error('❌ Error initializing auth:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    // Escuchar cambios de autenticación de Supabase
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        console.log('Auth state changed:', event, session?.user?.email);
-
-        if (event === 'SIGNED_IN' && session?.user) {
-          await loadUserFromDatabase(session.user);
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null);
-          localStorage.removeItem('eventosdisc-user');
-        }
-      }
-    );
-
     initializeAuth();
-
-    return () => {
-      subscription.unsubscribe();
-    };
   }, []);
 
-  // Cargar datos del usuario desde nuestra base de datos usando el email de Supabase
-  const loadUserFromDatabase = async (supabaseUser: SupabaseUser) => {
-    try {
-      const userData = await db.getUserByEmail(supabaseUser.email!);
 
-      if (userData) {
-        setUser(userData);
-        // Sincronizar con localStorage para compatibilidad
-        localStorage.setItem('eventosdisc-user', JSON.stringify({
-          id: userData.id,
-          email: userData.email,
-          name: userData.name,
-          role: userData.role,
-          businessId: userData.businessId
-        }));
-      } else {
-        console.warn('Usuario no encontrado en base de datos:', supabaseUser.email);
-        // Opcionalmente crear usuario automáticamente
-        await handleMissingUser(supabaseUser);
-      }
-    } catch (error) {
-      console.error('Error loading user from database:', error);
-    }
-  };
 
-  // Manejar usuarios que existen en Supabase pero no en nuestra BD
-  const handleMissingUser = async (supabaseUser: SupabaseUser) => {
-    try {
-      // Crear usuario automáticamente con rol customer
-      const newUser = await db.addUser({
-        email: supabaseUser.email!,
-        password: 'supabase-managed', // Placeholder ya que Supabase maneja la contraseña
-        name: supabaseUser.user_metadata?.name || supabaseUser.email!.split('@')[0],
-        role: 'customer'
-      });
-
-      if (newUser) {
-        setUser(newUser);
-        localStorage.setItem('eventosdisc-user', JSON.stringify({
-          id: newUser.id,
-          email: newUser.email,
-          name: newUser.name,
-          role: newUser.role,
-          businessId: newUser.businessId
-        }));
-      }
-    } catch (error) {
-      console.error('Error creating missing user:', error);
-    }
-  };
-
-  // Verificar usuario almacenado (fallback para compatibilidad)
+  // Verificar usuario almacenado para persistencia de sesión
   const checkStoredUser = async () => {
     try {
+      console.log('🔍 Checking stored user session...');
+
       const storedUser = localStorage.getItem('eventosdisc-user');
       if (storedUser) {
         const userData = JSON.parse(storedUser);
+        console.log('📦 Found stored user:', userData.email);
+
         // Verificar que el usuario aún existe en la base de datos
         const currentUser = await db.getUserById(userData.id);
         if (currentUser) {
+          console.log('✅ User session restored for:', currentUser.email);
           setUser(currentUser);
         } else {
-          // Usuario no existe, limpiar localStorage
+          console.log('⚠️ Stored user no longer exists in database, clearing session');
           localStorage.removeItem('eventosdisc-user');
         }
+      } else {
+        console.log('📭 No stored user session found');
       }
     } catch (error) {
-      console.error('Error checking stored user:', error);
+      console.error('❌ Error checking stored user:', error);
       localStorage.removeItem('eventosdisc-user');
     }
   };
 
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
-      // Intentar login con Supabase Auth primero
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      console.log('🔐 Attempting login for:', email);
 
-      if (error) {
-        console.log('Supabase auth failed, falling back to custom auth:', error.message);
-
-        // Fallback: usar autenticación custom
-        return await customLogin(email, password);
-      }
-
-      if (data.user) {
-        // El usuario se cargará automáticamente por el listener onAuthStateChange
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      console.error('Error in login:', error);
-      // Fallback: usar autenticación custom
-      return await customLogin(email, password);
-    }
-  };
-
-  // Método de login custom para compatibilidad
-  const customLogin = async (email: string, password: string): Promise<boolean> => {
-    try {
+      // Usar directamente nuestra autenticación custom que es más confiable
       const authenticatedUser = await db.authenticateUser(email, password);
 
       if (authenticatedUser) {
+        console.log('✅ Login successful for user:', authenticatedUser.email);
+
+        // Establecer usuario inmediatamente
         setUser(authenticatedUser);
+
+        // Guardar en localStorage para persistencia
         localStorage.setItem('eventosdisc-user', JSON.stringify({
           id: authenticatedUser.id,
           email: authenticatedUser.email,
@@ -169,15 +79,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: authenticatedUser.role,
           businessId: authenticatedUser.businessId
         }));
-        return true;
-      }
 
-      return false;
+        return true;
+      } else {
+        console.log('❌ Invalid credentials for:', email);
+        return false;
+      }
     } catch (error) {
-      console.error('Error in custom login:', error);
+      console.error('❌ Exception during login:', error);
       return false;
     }
   };
+
+
 
   const signup = async (email: string, password: string, name: string, role: User['role'] = 'customer'): Promise<boolean> => {
     try {
@@ -228,16 +142,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    try {
-      // Cerrar sesión en Supabase Auth
-      await supabase.auth.signOut();
-    } catch (error) {
-      console.error('Error signing out from Supabase:', error);
-    }
+    console.log('🔓 Logging out user...');
 
-    // Limpiar estado local
+    // Limpiar estado inmediatamente
     setUser(null);
     localStorage.removeItem('eventosdisc-user');
+
+    console.log('✅ Logout completed');
   };
 
   const value: AuthContextType = {

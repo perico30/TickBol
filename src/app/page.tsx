@@ -37,22 +37,7 @@ export default function HomePage() {
 
   useEffect(() => {
     loadEvents();
-
-    // Configurar polling para verificar nuevos eventos aprobados cada 30 segundos
-    const interval = setInterval(async () => {
-      try {
-        const newEvents = await db.getEvents();
-        if (newEvents.length !== events.length) {
-          console.log('Events count changed, refreshing...');
-          loadEvents();
-        }
-      } catch (error) {
-        console.error('Error polling events:', error);
-      }
-    }, 30000); // 30 segundos
-
-    return () => clearInterval(interval);
-  }, [events.length, loadEvents]);
+  }, [loadEvents]);
 
   // Función para refrescar manualmente
   const handleRefresh = () => {
@@ -188,42 +173,15 @@ export default function HomePage() {
   );
 }
 
-// Componente de debug separado para mejor organización
+// Componente de debug simplificado (sin consultas extras)
 function DebugInfo({ lastUpdate, eventsCount }: { lastUpdate: string; eventsCount: number }) {
-  const [debugStats, setDebugStats] = useState({
-    totalEvents: 0,
-    activeEvents: 0,
-    pendingEvents: 0
-  });
-
-  useEffect(() => {
-    const loadDebugStats = async () => {
-      try {
-        const allEvents = await db.getAllEvents();
-        const pendingEvents = await db.getPendingEvents();
-
-        setDebugStats({
-          totalEvents: allEvents.length,
-          activeEvents: allEvents.filter((e: Event) => e.isActive).length,
-          pendingEvents: pendingEvents.length
-        });
-      } catch (error) {
-        console.error('Error loading debug stats:', error);
-      }
-    };
-
-    loadDebugStats();
-  }, [eventsCount]);
-
   return (
     <div className="mt-8 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
       <h4 className="font-semibold text-yellow-800 mb-2">🔧 Info de Desarrollo</h4>
       <div className="text-sm text-yellow-700 space-y-1">
-        <p>• Total eventos en base de datos: {debugStats.totalEvents}</p>
-        <p>• Eventos activos: {debugStats.activeEvents}</p>
         <p>• Eventos aprobados mostrados: {eventsCount}</p>
-        <p>• Eventos pendientes: {debugStats.pendingEvents}</p>
         <p>• Última actualización: {lastUpdate}</p>
+        <p>• <em>Consultas de debug reducidas para mejor performance</em></p>
       </div>
     </div>
   );

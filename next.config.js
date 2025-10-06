@@ -1,47 +1,59 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Permitir imágenes externas
-  allowedDevOrigins: ["*.preview.same-app.com"],
-  images: {
-    unoptimized: true,
-    domains: [
-      "source.unsplash.com",
-      "images.unsplash.com",
-      "ext.same-assets.com",
-      "ugc.same-assets.com",
-    ],
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "source.unsplash.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "images.unsplash.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "ext.same-assets.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "ugc.same-assets.com",
-        pathname: "/**",
-      },
-    ],
-  },
-
-  // 🔧 Esta parte es la clave: evita que Vercel bloquee el deploy por errores de ESLint
+  // Deshabilitar ESLint durante el build para evitar errores en producción
   eslint: {
     ignoreDuringBuilds: true,
   },
-
-  // 🔧 (opcional) también podés forzar que TypeScript no bloquee builds
+  // Deshabilitar TypeScript type checking durante el build
   typescript: {
     ignoreBuildErrors: true,
+  },
+  // Configuración para optimización
+  experimental: {
+    optimizePackageImports: ['lucide-react'],
+  },
+  // Configuración de imágenes
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'images.unsplash.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'source.unsplash.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'ext.same-assets.com',
+      },
+      {
+        protocol: 'https',
+        hostname: 'ugc.same-assets.com',
+      },
+    ],
+  },
+  // Headers de seguridad
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY',
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'origin-when-cross-origin',
+          },
+        ],
+      },
+    ];
   },
 };
 

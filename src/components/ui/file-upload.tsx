@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, X, Image as ImageIcon } from 'lucide-react';
 import Image from 'next/image';
@@ -26,7 +26,13 @@ export default function FileUpload({
 }: FileUploadProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [mounted, setMounted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Evitar problemas de hidratación
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -77,8 +83,22 @@ export default function FileUpload({
 
   const isImage = value && (value.startsWith('data:image/') || value.startsWith('http'));
 
+  // Evitar problemas de hidratación
+  if (!mounted) {
+    return (
+      <div className={`space-y-3 ${className}`}>
+        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+          <div className="space-y-2">
+            <Upload className="h-8 w-8 text-gray-400 mx-auto" />
+            <p className="text-sm text-gray-600">Cargando...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`space-y-3 ${className}`}>
+    <div className={`space-y-3 ${className}`} key="file-upload-component">
       <input
         ref={fileInputRef}
         type="file"
@@ -89,16 +109,17 @@ export default function FileUpload({
 
       {!value ? (
         <div
+          key="upload-area"
           onClick={() => fileInputRef.current?.click()}
           className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center cursor-pointer hover:border-gray-400 transition-colors"
         >
           {loading ? (
-            <div className="space-y-2">
+            <div key="loading-state" className="space-y-2">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
               <p className="text-sm text-gray-600">Subiendo archivo...</p>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div key="empty-state" className="space-y-2">
               <Upload className="h-8 w-8 text-gray-400 mx-auto" />
               <p className="text-sm text-gray-600">{placeholder}</p>
               <p className="text-xs text-gray-400">
@@ -108,15 +129,16 @@ export default function FileUpload({
           )}
         </div>
       ) : (
-        <div className="space-y-3">
+        <div key="file-uploaded" className="space-y-3">
           {preview && isImage && (
-            <div className="relative border rounded-lg overflow-hidden">
+            <div key="image-preview" className="relative border rounded-lg overflow-hidden">
               <Image
                 src={value}
                 alt="Preview"
                 width={400}
                 height={300}
                 className="w-full h-48 object-cover"
+                unoptimized={value.startsWith('data:')}
               />
               <Button
                 size="sm"
@@ -130,7 +152,7 @@ export default function FileUpload({
           )}
 
           {!isImage && (
-            <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
+            <div key="file-info" className="flex items-center justify-between p-3 border rounded-lg bg-gray-50">
               <div className="flex items-center gap-2">
                 <ImageIcon size={16} className="text-gray-500" />
                 <span className="text-sm text-gray-700">Archivo subido</span>
@@ -141,7 +163,7 @@ export default function FileUpload({
             </div>
           )}
 
-          <div className="flex gap-2">
+          <div key="actions" className="flex gap-2">
             <Button
               variant="outline"
               onClick={() => fileInputRef.current?.click()}
@@ -155,7 +177,7 @@ export default function FileUpload({
       )}
 
       {error && (
-        <p className="text-sm text-red-600">{error}</p>
+        <p key="error-message" className="text-sm text-red-600">{error}</p>
       )}
     </div>
   );
