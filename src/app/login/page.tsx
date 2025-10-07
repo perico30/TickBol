@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import dynamic from 'next/dynamic';
+import NextDynamic from 'next/dynamic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,8 +14,8 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 // ❗ Usa Header/Footer solo en cliente (sin SSR)
-const Header = dynamic(() => import('@/components/Header'), { ssr: false });
-const Footer = dynamic(() => import('@/components/Footer'), { ssr: false });
+const Header = NextDynamic(() => import('@/components/Header'), { ssr: false });
+const Footer = NextDynamic(() => import('@/components/Footer'), { ssr: false });
 
 // ...el resto de tu componente exactamente igual
 
