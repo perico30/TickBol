@@ -3,15 +3,11 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import NextDynamic from 'next/dynamic'; // ⬅️ alias para no chocar con la bandera
+import NextDynamic from 'next/dynamic'; // alias para no chocar con la bandera 'dynamic' del framework
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-
-// Desactiva prerender/ISR para esta página
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
 // Header/Footer solo en cliente (evita SSR en build)
 const Header = NextDynamic(() => import('@/components/Header'), { ssr: false });
