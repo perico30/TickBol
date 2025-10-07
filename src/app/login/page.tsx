@@ -3,26 +3,19 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import NextDynamic from 'next/dynamic';
+import NextDynamic from 'next/dynamic'; // ⬅️ alias para no chocar con la bandera
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
-// Fuerza render dinámico (sin prerender)
+// Desactiva prerender/ISR para esta página
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// ❗ Usa Header/Footer solo en cliente (sin SSR)
+// Header/Footer solo en cliente (evita SSR en build)
 const Header = NextDynamic(() => import('@/components/Header'), { ssr: false });
 const Footer = NextDynamic(() => import('@/components/Footer'), { ssr: false });
-
-// ...el resto de tu componente exactamente igual
-
-
-// ⬇️ añade estas dos líneas arriba del archivo
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
